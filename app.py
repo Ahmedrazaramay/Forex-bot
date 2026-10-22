@@ -9,8 +9,8 @@ VERIFY_TOKEN = "my_secret_forex_bot_123"
 WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
 PHONE_NUMBER_ID = "1443823042139151"
 
-# DeepSeek key
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-2e97b226d171455fbcdf56164cc6974e")
+# Yahan koi key nahi hai! Yeh direct Render ke Environment se uthayega.
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
@@ -26,7 +26,10 @@ def send_whatsapp_message(to, text):
 def get_ai_analysis(user_message):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+    
+    # Abhi ke liye basic prompt, baad mein isme aapke SMC rules add honge
     prompt = f"Analyze based on SMC rules: {user_message}. Give a short answer in Roman Urdu."
+    
     payload = {
         "model": "deepseek-chat",
         "messages": [{"role": "user", "content": prompt}],
@@ -34,11 +37,8 @@ def get_ai_analysis(user_message):
     }
     try:
         res = requests.post(url, headers=headers, json=payload).json()
-        
-        # Agar response mein choices nahi hain, to asli error wapis bhej do
         if 'choices' not in res:
             return f"ASLI ERROR: {str(res)}"
-            
         return res['choices'][0]['message']['content']
     except Exception as e:
         return f"CODE ERROR: {str(e)}"
@@ -67,10 +67,11 @@ def webhook():
                                 user_message = msg['text']['body']
                                 user_number = msg['from']
                                 
-                                # AI se analysis
-                                analysis = get_ai_analysis(user_message)
+                                # Bot apne aap ko reply na kare
+                                if user_number == "1443823042139151":
+                                    return "OK", 200
                                 
-                                # Reply bhejna
+                                analysis = get_ai_analysis(user_message)
                                 send_whatsapp_message(user_number, analysis)
         except Exception as e:
             pass
