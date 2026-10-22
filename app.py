@@ -1,12 +1,13 @@
 from flask import Flask, request
 import requests
-import os
+import json
 
 app = Flask(__name__)
 
+# DIRECT TOKENS (Test ke liye)
+WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
+PHONE_NUMBER_ID = "1443823042139151"
 VERIFY_TOKEN = "my_secret_forex_bot_123"
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
@@ -17,9 +18,11 @@ def send_whatsapp_message(to, text):
         "type": "text",
         "text": {"body": text}
     }
-    # Yahan hum print karenge ke Meta kya jawab de raha hai
-    response = requests.post(url, headers=headers, json=payload)
-    print(f"META API RESPONSE: {response.text}")
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        print("META RESPONSE:", response.text) # Yeh logs mein nazar aayega
+    except Exception as e:
+        print("SEND ERROR:", str(e))
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -41,15 +44,14 @@ def webhook():
                         if 'messages' in value:
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
-                                user_number = msg['from']
                                 user_message = msg['text']['body']
+                                user_number = msg['from']
                                 
-                                print(f"MESSAGE AAYA: {user_message}")
-                                
-                                # Direct reply bhej do bina kisi AI ke
-                                send_whatsapp_message(user_number, f"Aapne likha: '{user_message}'. Bot zinda hai!")
+                                # Direct Echo test
+                                reply_text = f"Aapne bheja: '{user_message}'. Bot zinda hai!"
+                                send_whatsapp_message(user_number, reply_text)
         except Exception as e:
-            print(f"ERROR: {e}")
+            print("WEBHOOK ERROR:", str(e))
         return "OK", 200
 
 if __name__ == '__main__':
