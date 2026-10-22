@@ -2,17 +2,19 @@ from flask import Flask, request
 import requests
 import json
 import os
+import re
 
 app = Flask(__name__)
 
 # ==========================================
-# SAARI KEYS RENDER KE ENVIRONMENT SE UTHAYI JAYENGI
+# SAARI KEYS RENDER KE ENVIRONMENT SE
 # ==========================================
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123")
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
+ORACLE_ALERT_API = os.environ.get("ORACLE_ALERT_API", "") # Agar set nahi to khali
 
 SMC_RULES = """
 You are a strict SMC/ICT Forex Day Trading Bot. 
@@ -27,6 +29,11 @@ Analyze the provided multi-timeframe market data based ONLY on these rules:
 8. If NO TRADE, you MUST provide the exact 'Alert Level' (price) that needs to break for a valid setup.
 """
 
+# 1. ROOT ROUTE (UptimeRobot ke liye - Sleep Fix)
+@app.route('/', methods=['GET'])
+def home():
+    return "Forex Bot is Alive and Awake!", 200
+
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
@@ -37,6 +44,7 @@ def send_whatsapp_message(to, text):
         print("SEND ERROR:", str(e))
 
 def get_live_data(pair):
+    # Pair formatting
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
@@ -53,10 +61,11 @@ def get_live_data(pair):
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return f"TWELVEDATA ERROR: {str(res)}"
+                # Agar pair galat ho ya limit khatam ho
+                return None, f"DATA ERROR ({symbol}): {res.get('message', 'Unknown error')}"
         except Exception as e:
-            return f"NETWORK ERROR: {str(e)}"
-    return data_text
+            return None, f"NETWORK ERROR: {str(e)}"
+    return data_text, None
 
 def get_ai_analysis(pair, live_data):
     url = "https://api.deepseek.com/chat/completions"
@@ -89,21 +98,50 @@ def webhook():
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
                                 user_number = msg['from']
-                                user_message = msg['text']['body']
+                                user_message = msg['text']['body'].strip()
+                                msg_upper = user_message.upper()
                                 
-                                if user_number == PHONE_NUMBER_ID: return "OK", 200
+                                # 2. Pair Validation & Alert Command
+                                if "ALERT" in msg_upper:
+                                    # Format: ALERT GOLD 2350 ya ALERT EURUSD 1.1000
+                                    parts = msg_upper.split()
+                                    if len(parts) >= 3:
+                                        alert_pair = parts[1]
+                                        alert_price = parts[2]
+                                        if ORACLE_ALERT_API:
+                                            # Oracle ko bhejna
+                                            try:
+                                                requests.post(ORACLE_ALERT_API, json={"pair": alert_pair, "price": alert_price})
+                                                send_whatsapp_message(user_number, f"✅ Alert set for {alert_pair} at {alert_price}. Oracle is watching.")
+                                            except:
+                                                send_whatsapp_message(user_number, f"❌ Oracle API connect nahi ho rahi. Please check Render settings.")
+                                        else:
+                                            send_whatsapp_message(user_number, f"⚠️ Alert set karne ke liye Oracle API link set nahi hai.")
+                                    else:
+                                        send_whatsapp_message(user_number, "Format galat hai. Aise likhein: ALERT GOLD 2350")
+                                    return "OK", 200
                                 
-                                pair = "XAU/USD" if "GOLD" in user_message.upper() else user_message
+                                # 3. Valid Pair Check (Hi, Hello ko filter karne ke liye)
+                                valid_pairs = ["GOLD", "XAU", "EURUSD", "GBPUSD", "USDJPY", "GBPJPY", "BTCUSD", "US30", "OIL"]
+                                # Agar user ne seedha pair likha hai (jaise EURUSD) ya common word hai
+                                is_pair = any(p in msg_upper for p in valid_pairs) or (len(msg_upper) == 6 and msg_upper.isalpha())
                                 
-                                live_data = get_live_data(pair)
-                                if live_data.startswith("TWELVEDATA") or live_data.startswith("NETWORK"):
-                                    send_whatsapp_message(user_number, live_data)
+                                if not is_pair:
+                                    send_whatsapp_message(user_number, "Bhai koi valid pair likhein (jaise GOLD, EURUSD, GBPUSD) ya Alert lagane ke liye 'ALERT GOLD 2350' likhein.")
+                                    return "OK", 200
+                                
+                                # Default to Gold if just "GOLD" is sent
+                                pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
+                                
+                                live_data, error = get_live_data(pair)
+                                if error:
+                                    send_whatsapp_message(user_number, error)
                                     return "OK", 200
                                 
                                 analysis = get_ai_analysis(pair, live_data)
                                 send_whatsapp_message(user_number, analysis)
         except Exception as e:
-            print(f"Webhook Error: {e}")
+            print(f"WEBHOOK ERROR: {e}")
         return "OK", 200
 
 if __name__ == '__main__':
