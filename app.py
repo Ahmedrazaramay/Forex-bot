@@ -6,7 +6,7 @@ import os
 app = Flask(__name__)
 
 # ==========================================
-# YAHAN SE SAARI KEYS RENDER SE UTHAYI JAYENGI
+# RENDER SE KEYS UTHANA
 # ==========================================
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123")
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
@@ -41,10 +41,9 @@ def send_whatsapp_message(to, text):
     try:
         requests.post(url, headers=headers, json=payload)
     except Exception as e:
-        print(f"WhatsApp Error: {e}")
+        print(f"WhatsApp Send Error: {e}")
 
 def get_live_data(pair):
-    # Pair format fix (Gold -> XAU/USD, EURUSD -> EUR/USD)
     symbol = pair.upper().replace("GOLD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
@@ -61,9 +60,10 @@ def get_live_data(pair):
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None # Agar data na mile to None return kare
-        except:
-            return None
+                # Agar TwelveData koi error de (jaise limit khatam), to wapis bhej do
+                return f"TWELVEDATA ERROR: {str(res)}"
+        except Exception as e:
+            return f"NETWORK ERROR: {str(e)}"
             
     return data_text
 
@@ -99,10 +99,10 @@ def get_ai_analysis(pair, live_data):
     try:
         res = requests.post(url, headers=headers, json=payload).json()
         if 'choices' not in res:
-            return f"API ERROR: {str(res)}"
+            return f"DEEPSEEK API ERROR: {str(res)}"
         return res['choices'][0]['message']['content']
     except Exception as e:
-        return f"CODE ERROR: {str(e)}"
+        return f"AI CODE ERROR: {str(e)}"
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -127,22 +127,25 @@ def webhook():
                                 user_message = msg['text']['body']
                                 user_number = msg['from']
                                 
-                                # Guard: Bot apne aap ko reply na kare
                                 if user_number == PHONE_NUMBER_ID:
                                     return "OK", 200
                                 
-                                # Default Pair Gold, warna jo user ne likha
                                 pair = "XAU/USD" if "GOLD" in user_message.upper() or "XAU" in user_message.upper() else user_message
                                 
                                 live_data = get_live_data(pair)
-                                if not live_data:
-                                    send_whatsapp_message(user_number, f"Bhai {pair} ka data nahi mil raha. Spelling check karein (e.g. EURUSD ya GOLD).")
+                                # Agar data lane mein error aya, to wo error WhatsApp par bhej do
+                                if live_data.startswith("TWELVEDATA ERROR") or live_data.startswith("NETWORK ERROR"):
+                                    send_whatsapp_message(user_number, live_data)
                                     return "OK", 200
                                     
                                 analysis = get_ai_analysis(pair, live_data)
                                 send_whatsapp_message(user_number, analysis)
         except Exception as e:
-            print(f"Webhook Error: {e}")
+            # Agar poora system crash ho, to error WhatsApp par bhej do
+            try:
+                send_whatsapp_message(user_number, f"WEBHOOK SYSTEM ERROR: {str(e)}")
+            except:
+                pass
         return "OK", 200
 
 if __name__ == '__main__':
