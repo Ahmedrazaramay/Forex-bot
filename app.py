@@ -1,6 +1,7 @@
 from flask import Flask, request
 import requests
 import json
+import os  # YEH LINE MISSING THI, AB DAAL DI HAI
 
 app = Flask(__name__)
 
@@ -20,7 +21,7 @@ def send_whatsapp_message(to, text):
     }
     try:
         response = requests.post(url, headers=headers, json=payload)
-        print("META RESPONSE:", response.text) # Yeh logs mein nazar aayega
+        print("META RESPONSE:", response.text)
     except Exception as e:
         print("SEND ERROR:", str(e))
 
@@ -47,7 +48,6 @@ def webhook():
                                 user_message = msg['text']['body']
                                 user_number = msg['from']
                                 
-                                # Direct Echo test
                                 reply_text = f"Aapne bheja: '{user_message}'. Bot zinda hai!"
                                 send_whatsapp_message(user_number, reply_text)
         except Exception as e:
