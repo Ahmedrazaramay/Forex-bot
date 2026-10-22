@@ -9,7 +9,7 @@ VERIFY_TOKEN = "my_secret_forex_bot_123"
 WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
 PHONE_NUMBER_ID = "1443823042139151"
 
-# DeepSeek key ab Render ke environment variable se uthayega
+# DeepSeek key
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-2e97b226d171455fbcdf56164cc6974e")
 
 def send_whatsapp_message(to, text):
@@ -21,9 +21,7 @@ def send_whatsapp_message(to, text):
         "type": "text",
         "text": {"body": text}
     }
-    # YEH LINE META KA ASLI JAWAB (ERROR) PRINT KAREGI
-    response = requests.post(url, headers=headers, json=payload)
-    print(f"META KA JAWAB: {response.text}")
+    requests.post(url, headers=headers, json=payload)
 
 def get_ai_analysis(user_message):
     url = "https://api.deepseek.com/chat/completions"
@@ -36,10 +34,14 @@ def get_ai_analysis(user_message):
     }
     try:
         res = requests.post(url, headers=headers, json=payload).json()
+        
+        # Agar response mein choices nahi hain, to asli error wapis bhej do
+        if 'choices' not in res:
+            return f"ASLI ERROR: {str(res)}"
+            
         return res['choices'][0]['message']['content']
     except Exception as e:
-        print(f"AI ERROR: {e}")
-        return "Bhai AI abhi busy hai."
+        return f"CODE ERROR: {str(e)}"
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -65,16 +67,13 @@ def webhook():
                                 user_message = msg['text']['body']
                                 user_number = msg['from']
                                 
-                                # YEH LINE CHECK KAREGI KE MESSAGE AAYA YA NHI
-                                print(f"MESSAGE AAYA: {user_message}")
-                                
                                 # AI se analysis
                                 analysis = get_ai_analysis(user_message)
                                 
                                 # Reply bhejna
                                 send_whatsapp_message(user_number, analysis)
         except Exception as e:
-            print(f"WEBHOOK ERROR: {e}")
+            pass
         return "OK", 200
 
 if __name__ == '__main__':
