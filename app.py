@@ -1,77 +1,82 @@
-import os
-import requests
 from flask import Flask, request
+import requests
+import json
+import os
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
-DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY")
+VERIFY_TOKEN = "my_secret_forex_bot_123"
+WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
+PHONE_NUMBER_ID = "1443823042139151"
 
-@app.route("/", methods=["GET"])
-def home():
-    return "Bot Live - DeepSeek Ready"
+# DeepSeek key ab Render ke environment variable se uthayega
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-2e97b226d171455fbcdf56164cc6974e")
 
-@app.route("/webhook", methods=["GET"])
-def verify():
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        return challenge, 200
-    return "Forbidden", 403
+def send_whatsapp_message(to, text):
+    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {"body": text}
+    }
+    # YEH LINE META KA ASLI JAWAB (ERROR) PRINT KAREGI
+    response = requests.post(url, headers=headers, json=payload)
+    print(f"META KA JAWAB: {response.text}")
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
+def get_ai_analysis(user_message):
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+    prompt = f"Analyze based on SMC rules: {user_message}. Give a short answer in Roman Urdu."
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2
+    }
     try:
-        data = request.get_json()
-        entry = data["entry"][0]["changes"][0]["value"]
-        if "messages" in entry:
-            msg = entry["messages"][0]
-            from_number = msg["from"]
-            text = msg["text"]["body"]
-            upper_text = text.upper()
-
-            if "GOLD" in upper_text or "XAU" in upper_text or "EURUSD" in upper_text:
-                # DeepSeek Call
-                ds_url = "https://api.deepseek.com/v1/chat/completions"
-                ds_headers = {
-                    "Authorization": f"Bearer {DEEPSEEK_KEY}",
-                    "Content-Type": "application/json"
-                }
-                ds_payload = {
-                    "model": "deepseek-chat",
-                    "messages": [
-                        {"role": "system", "content": "You are a professional Gold XAUUSD forex signal provider. Give concise signal with BUY/SELL, Entry Price, SL, TP1, TP2, TP3. Keep it short."},
-                        {"role": "user", "content": f"Give live trading signal for {text}. Current gold price around."}
-                    ]
-                }
-                r = requests.post(ds_url, headers=ds_headers, json=ds_payload, timeout=30)
-                if r.status_code == 200:
-                    ai_reply = r.json()["choices"][0]["message"]["content"]
-                else:
-                    ai_reply = f"DeepSeek Error {r.status_code}: Check API Key. Details: {r.text[:300]}"
-            else:
-                ai_reply = f"Send GOLD or XAUUSD to get signal. You said: {text}"
-
-            # Send WhatsApp Reply
-            wa_url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
-            wa_headers = {
-                "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            wa_payload = {
-                "messaging_product": "whatsapp",
-                "to": from_number,
-                "text": {"body": ai_reply}
-            }
-            requests.post(wa_url, headers=wa_headers, json=wa_payload)
-
+        res = requests.post(url, headers=headers, json=payload).json()
+        return res['choices'][0]['message']['content']
     except Exception as e:
-        print(f"Error: {e}")
-    
-    return "OK", 200
+        print(f"AI ERROR: {e}")
+        return "Bhai AI abhi busy hai."
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    if request.method == 'GET':
+        mode = request.args.get('hub.mode')
+        token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+        if mode == 'subscribe' and token == VERIFY_TOKEN:
+            return challenge, 200
+        else:
+            return "Forbidden", 403
+
+    elif request.method == 'POST':
+        data = request.json
+        try:
+            if data.get('object') == 'whatsapp_business_account':
+                for entry in data.get('entry', []):
+                    for change in entry.get('changes', []):
+                        value = change.get('value', {})
+                        if 'messages' in value:
+                            msg = value['messages'][0]
+                            if msg['type'] == 'text':
+                                user_message = msg['text']['body']
+                                user_number = msg['from']
+                                
+                                # YEH LINE CHECK KAREGI KE MESSAGE AAYA YA NHI
+                                print(f"MESSAGE AAYA: {user_message}")
+                                
+                                # AI se analysis
+                                analysis = get_ai_analysis(user_message)
+                                
+                                # Reply bhejna
+                                send_whatsapp_message(user_number, analysis)
+        except Exception as e:
+            print(f"WEBHOOK ERROR: {e}")
+        return "OK", 200
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
