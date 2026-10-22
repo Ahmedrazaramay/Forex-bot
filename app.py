@@ -5,12 +5,12 @@ import os
 
 app = Flask(__name__)
 
-# WHATSAPP TOKENS DIRECT HARDCODED (Bina Env variables ke, taake connection pakka ho)
-WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
-PHONE_NUMBER_ID = "1443823042139151"
-VERIFY_TOKEN = "my_secret_forex_bot_123"
-
-# AI aur Data Keys Render se
+# ==========================================
+# SAARI KEYS RENDER KE ENVIRONMENT SE UTHAYI JAYENGI
+# ==========================================
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123")
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
 
@@ -32,8 +32,7 @@ def send_whatsapp_message(to, text):
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        print("META API RESPONSE:", response.text) # Logs mein check karne ke liye
+        requests.post(url, headers=headers, json=payload)
     except Exception as e:
         print("SEND ERROR:", str(e))
 
@@ -42,9 +41,6 @@ def get_live_data(pair):
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
     
-    if not TWELVEDATA_API_KEY:
-        return "ERROR: TwelveData API Key missing in Render!"
-
     timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
     data_text = ""
     
@@ -60,18 +56,12 @@ def get_live_data(pair):
                 return f"TWELVEDATA ERROR: {str(res)}"
         except Exception as e:
             return f"NETWORK ERROR: {str(e)}"
-            
     return data_text
 
 def get_ai_analysis(pair, live_data):
-    if not DEEPSEEK_API_KEY:
-        return "ERROR: DeepSeek API Key missing in Render!"
-
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-    
     prompt = f"Pair: {pair}\nRules:\n{SMC_RULES}\nLive Data:\n{live_data}\nOutput in Roman Urdu (Bias, Direction, 1H Structure, Entry Status, Entry, SL, TP, Alert Level)."
-    
     payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
     try:
         res = requests.post(url, headers=headers, json=payload).json()
@@ -105,17 +95,15 @@ def webhook():
                                 
                                 pair = "XAU/USD" if "GOLD" in user_message.upper() else user_message
                                 
-                                # Step 1: Data Check
                                 live_data = get_live_data(pair)
-                                if live_data.startswith("TWELVEDATA ERROR") or live_data.startswith("NETWORK ERROR") or live_data.startswith("ERROR"):
+                                if live_data.startswith("TWELVEDATA") or live_data.startswith("NETWORK"):
                                     send_whatsapp_message(user_number, live_data)
                                     return "OK", 200
                                 
-                                # Step 2: AI Check
                                 analysis = get_ai_analysis(pair, live_data)
                                 send_whatsapp_message(user_number, analysis)
         except Exception as e:
-            send_whatsapp_message(user_number, f"CRASH ERROR: {str(e)}")
+            print(f"Webhook Error: {e}")
         return "OK", 200
 
 if __name__ == '__main__':
