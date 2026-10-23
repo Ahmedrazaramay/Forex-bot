@@ -5,7 +5,7 @@ import os
 app = Flask(__name__)
 
 # ==========================================
-# SAARI KEYS RENDER KE ENVIRONMENT SE (100% SECURE)
+# SAARI KEYS RENDER KE ENVIRONMENT SE
 # ==========================================
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
@@ -22,14 +22,13 @@ Analyze based ONLY on these rules:
 4. Entry: 1H POI Tap + 5M MSS + Displacement + Retest.
 5. SL: 5M POI + buffer. TP: 1H liquidity.
 6. RR: Strict 1:3. Agar 1:3 nahi ban rahi to NO TRADE.
-7. If NO TRADE, provide the exact 'Alert Level' (price) to break for a valid setup.
+7. If NO TRADE, provide the exact 'Alert Level' (price).
 """
 
 def send_whatsapp_message(to, text):
     if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
         print("ERROR: WhatsApp Tokens missing in Render!")
         return
-        
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
@@ -47,7 +46,7 @@ def get_live_data(pair):
     data_text = ""
     
     for tf_name, tf_code in timeframes.items():
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=3&apikey={TWELVEDATA_API_KEY}" # outputsize 5 se 3 kar diya taake data chota ho
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=2&apikey={TWELVEDATA_API_KEY}"
         try:
             res = requests.get(url, timeout=10).json()
             if 'values' in res:
@@ -64,7 +63,6 @@ def get_ai_analysis(pair, live_data):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     
-    # PROMPT UPDATE: Ab AI lambi kahani nahi sunayega, sirf short points dega
     prompt = f"""
     Pair: {pair}
     Live Data:\n{live_data}\n
@@ -114,19 +112,25 @@ def webhook():
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip().upper()
                                 
+                                # 1. Check if WhatsApp tokens are working by sending a quick Ack
+                                send_whatsapp_message(user_number, "⏳ Checking APIs...")
+                                
+                                if not DEEPSEEK_API_KEY or not TWELVEDATA_API_KEY:
+                                    send_whatsapp_message(user_number, "❌ ERROR: API Keys (DeepSeek/TwelveData) Render mein nahi mili!")
+                                    return "OK", 200
+
                                 pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
                                 
-                                if len(pair) < 3:
-                                    send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
-                                    return "OK", 200
-                                
+                                # 2. Data fetch
                                 live_data = get_live_data(pair)
                                 if live_data.startswith("DATA ERROR") or live_data.startswith("NETWORK ERROR"):
                                     send_whatsapp_message(user_number, live_data)
                                     return "OK", 200
                                     
+                                # 3. AI analysis
                                 analysis = get_ai_analysis(pair, live_data)
                                 send_whatsapp_message(user_number, analysis)
+                                
         except Exception as e:
             print(f"WEBHOOK CRASH: {e}")
         return "OK", 200
