@@ -1,10 +1,11 @@
 from flask import Flask, request
 import requests
 import os
+import re
 
 app = Flask(__name__)
 
-# DIRECT WHATSAPP TOKENS (Jo abhi test mein kaam kar chuke hain)
+# DIRECT WHATSAPP TOKENS
 WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
 PHONE_NUMBER_ID = "1443823042139151"
 VERIFY_TOKEN = "my_secret_forex_bot_123"
@@ -13,14 +14,63 @@ VERIFY_TOKEN = "my_secret_forex_bot_123"
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
 
+SMC_RULES = """
+You are a strict SMC/ICT Forex Day Trading Bot. 
+Analyze the provided multi-timeframe market data based ONLY on these rules:
+1. Setup: 1H POI -> 5M Entry.
+2. Bias: Monthly/Weekly/Daily (Bada timeframe jeetega).
+3. POI: Order Block with FVG. Buy = Discount zone, Sell = Premium zone.
+4. Entry Confirmation: 1H POI Tap + 5M MSS + Displacement + Retest.
+5. SL: 5M entry POI ke neeche/upar + buffer.
+6. TP: 1H nearest liquidity.
+7. RR: SIRF 1:3 (Strict). Agar 1:3 nahi ban rahi to NO TRADE.
+8. If NO TRADE, you MUST provide the exact 'Alert Level' (price) that needs to break for a valid setup.
+"""
+
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
-        requests.post(url, headers=headers, json=payload)
+        requests.post(url, headers=headers, json=payload, timeout=10)
     except Exception as e:
-        print(f"SEND ERROR: {e}")
+        print("SEND ERROR:", e)
+
+def get_live_data(pair):
+    symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
+    if "/" not in symbol and len(symbol) == 6:
+        symbol = symbol[:3] + "/" + symbol[3:]
+    
+    timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
+    data_text = ""
+    
+    for tf_name, tf_code in timeframes.items():
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=5&apikey={TWELVEDATA_API_KEY}"
+        try:
+            res = requests.get(url, timeout=10).json()
+            if 'values' in res:
+                data_text += f"--- {tf_name} Candles ---\n"
+                for c in res['values']:
+                    data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
+            else:
+                return f"DATA ERROR ({symbol}): {res.get('message', 'Check Pair Name')}"
+        except Exception as e:
+            return f"NETWORK ERROR: {str(e)}"
+    return data_text
+
+def get_ai_analysis(pair, live_data):
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+    prompt = f"Pair: {pair}\nRules:\n{SMC_RULES}\nLive Data:\n{live_data}\nOutput in Roman Urdu (Bias, Direction, 1H Structure, Entry Status, Entry, SL, TP, Alert Level)."
+    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+    
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=30).json() # AI ko sochne ka zyada time diya
+        if 'choices' not in res:
+            return f"DEEPSEEK API ERROR: {str(res)}"
+        return res['choices'][0]['message']['content']
+    except Exception as e:
+        return f"AI CODE ERROR: {str(e)}"
 
 @app.route('/', methods=['GET'])
 def home():
@@ -44,43 +94,25 @@ def webhook():
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
                                 user_number = msg['from']
-                                user_message = msg['text']['body']
+                                user_message = msg['text']['body'].strip().upper()
                                 
-                                # 1. TWELVEDATA TEST
-                                if not TWELVEDATA_API_KEY:
-                                    send_whatsapp_message(user_number, "ERROR: TWELVEDATA_API_KEY Render mein nahi mili!")
+                                # Pair extract karein
+                                pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
+                                
+                                # Check karein ke valid pair lag raha hai ya nahi
+                                if len(pair) < 3:
+                                    send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
                                     return "OK", 200
                                 
-                                td_url = f"https://api.twelvedata.com/price?symbol=XAU/USD&apikey={TWELVEDATA_API_KEY}"
-                                td_res = requests.get(td_url).json()
-                                
-                                if 'price' not in td_res:
-                                    send_whatsapp_message(user_number, f"TWELVEDATA ERROR: {str(td_res)}")
+                                live_data = get_live_data(pair)
+                                if live_data.startswith("DATA ERROR") or live_data.startswith("NETWORK ERROR"):
+                                    send_whatsapp_message(user_number, live_data)
                                     return "OK", 200
-                                
-                                # 2. DEEPSEEK TEST
-                                if not DEEPSEEK_API_KEY:
-                                    send_whatsapp_message(user_number, "ERROR: DEEPSEEK_API_KEY Render mein nahi mili!")
-                                    return "OK", 200
-                                
-                                ai_url = "https://api.deepseek.com/chat/completions"
-                                ai_headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-                                ai_payload = {
-                                    "model": "deepseek-chat",
-                                    "messages": [{"role": "user", "content": f"Say 'API is working' in Urdu."}],
-                                    "temperature": 0.1
-                                }
-                                ai_res = requests.post(ai_url, headers=ai_headers, json=ai_payload).json()
-                                
-                                if 'choices' not in ai_res:
-                                    send_whatsapp_message(user_number, f"DEEPSEEK ERROR: {str(ai_res)}")
-                                    return "OK", 200
-                                
-                                # AGAR DONO THEEK HAIN
-                                send_whatsapp_message(user_number, f"✅ DONO API THEEK HAIN!\nTwelveData Price: {td_res['price']}\nAI Response: {ai_res['choices'][0]['message']['content']}")
-                                
+                                    
+                                analysis = get_ai_analysis(pair, live_data)
+                                send_whatsapp_message(user_number, analysis)
         except Exception as e:
-            print(f"WEBHOOK ERROR: {e}")
+            print(f"WEBHOOK CRASH: {e}")
         return "OK", 200
 
 if __name__ == '__main__':
