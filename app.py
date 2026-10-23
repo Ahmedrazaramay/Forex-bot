@@ -4,24 +4,14 @@ import os
 
 app = Flask(__name__)
 
-# DIRECT WHATSAPP TOKENS (Taake connection 100% pakka ho)
-WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
-PHONE_NUMBER_ID = "1443823042139151"
-VERIFY_TOKEN = "my_secret_forex_bot_123"
-
-# AI AUR DATA KEYS ENVIRONMENT SE
+# ==========================================
+# 100% SECURE (Saari keys sirf Render se aayengi)
+# ==========================================
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
-
-SMC_RULES = """
-You are a strict SMC/ICT Forex Day Trading Bot. 
-Analyze based ONLY on these rules:
-1. Setup: 1H POI -> 5M Entry.
-2. Bias: Monthly/Weekly/Daily.
-3. POI: Order Block with FVG.
-4. Entry: 1H POI Tap + 5M MSS + Displacement + Retest.
-5. SL/TP: 1:3 RR Strict.
-"""
 
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
@@ -39,25 +29,62 @@ def get_live_data(pair):
     
     timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
     data_text = ""
+    current_price = 0
     
     for tf_name, tf_code in timeframes.items():
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=2&apikey={TWELVEDATA_API_KEY}"
         try:
             res = requests.get(url, timeout=10).json()
             if 'values' in res:
+                if tf_code == "5min":
+                    current_price = res['values'][0]['close']
+                
                 data_text += f"--- {tf_name} ---\n"
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None # Data nahi mila
-        except Exception:
-            return None
-    return data_text
+                return None, f"DATA ERROR ({symbol}): {res.get('message', 'Pair galat hai')}"
+        except Exception as e:
+            return None, f"NETWORK ERROR: {str(e)}"
+            
+    return data_text, current_price
 
-def get_ai_analysis(pair, live_data):
+def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-    prompt = f"Pair: {pair}\nData:\n{live_data}\nRules:\n{SMC_RULES}\nReply in SHORT Roman Urdu bullet points: Bias, Direction, Status, Entry, SL, TP, Alert Level."
+    
+    # SAKHT FORMAT PROMPT (Entry Reason ke sath)
+    prompt = f"""
+    You are an expert SMC/ICT Forex Bot.
+    Pair: {pair}
+    Current Price: {current_price}
+    
+    Live Data:\n{live_data}\n
+    
+    Instructions:
+    1. Analyze ONLY based on SMC rules (Order Block, FVG, MSS, Liquidity).
+    2. DO NOT write any introduction or long paragraphs. Just give the exact output format.
+    3. Use the Current Price ({current_price}) to calculate Entry, SL, and TP.
+    
+    OUTPUT FORMAT (Strictly follow this):
+    
+    * Weekly Direction: [Bullish/Bearish]
+    * Daily Direction: [Bullish/Bearish]
+    * 1H Structure: [Bullish/Bearish/Consolidation]
+    * Status: [ENTRY / NO TRADE]
+    
+    (If Status is ENTRY):
+    * Entry Reason: [1 short line explaining the SMC setup, e.g., 1H FVG + 5M CHoCH]
+    * Entry: [Price]
+    * SL: [Price]
+    * TP: [Price]
+    * RR: 1:3
+    
+    (If Status is NO TRADE):
+    * Alert Level: [Price to break for a valid entry]
+    * Reason: [1 short line in Roman Urdu]
+    """
+    
     payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
     
     try:
@@ -93,31 +120,23 @@ def webhook():
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip().upper()
                                 
-                                # 1. GREETINGS FILTER
                                 greetings = ["HI", "HELLO", "HELO", "SALAM", "AO", "START", "HEY"]
                                 if user_message in greetings:
-                                    welcome_msg = (
-                                        "🤖 *Forex SMC Bot Active!*\n\n"
-                                        "Mujhe kisi bhi pair ka naam bhejein (jaise GOLD, EURUSD, GBPUSD, BTCUSD).\n"
-                                        "Main aapko 4 Timeframes (W, D, 1H, 5M) ki SMC analysis dunga."
-                                    )
-                                    send_whatsapp_message(user_number, welcome_msg)
+                                    send_whatsapp_message(user_number, "🤖 *Forex SMC Bot Active!*\n\nMujhe kisi bhi pair ka naam bhejein (jaise GOLD, EURUSD, GBPUSD).")
                                     return "OK", 200
                                 
-                                # 2. PAIR FORMAT & VALIDATION
                                 pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
                                 
                                 if len(pair) < 4:
                                     send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
                                     return "OK", 200
                                 
-                                # 3. DATA & ANALYSIS
-                                live_data = get_live_data(pair)
+                                live_data, current_price = get_live_data(pair)
                                 if not live_data:
-                                    send_whatsapp_message(user_number, f"❌ Data nahi mila. Check karein ke '{pair}' sahi pair hai ya nahi.")
+                                    send_whatsapp_message(user_number, current_price) 
                                     return "OK", 200
                                     
-                                analysis = get_ai_analysis(pair, live_data)
+                                analysis = get_ai_analysis(pair, live_data, current_price)
                                 send_whatsapp_message(user_number, analysis)
                                 
         except Exception as e:
