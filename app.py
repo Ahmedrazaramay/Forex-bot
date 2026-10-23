@@ -4,67 +4,18 @@ import os
 
 app = Flask(__name__)
 
-# Render se keys uthana (Sab theek hai aapki settings)
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+VERIFY_TOKEN = "my_secret_forex_bot_123"
 
-SMC_RULES = """
-You are a strict SMC/ICT Forex Day Trading Bot. 
-Analyze based ONLY on these rules:
-1. Setup: 1H POI -> 5M Entry.
-2. Bias: Monthly/Weekly/Daily.
-3. POI: Order Block with FVG.
-4. Entry: 1H POI Tap + 5M MSS + Displacement + Retest.
-5. SL/TP: 1:3 RR Strict.
-"""
-
-def send_whatsapp_message(to, text):
+def send_msg(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
         requests.post(url, headers=headers, json=payload, timeout=10)
     except Exception as e:
-        print("SEND ERROR:", e)
-
-def get_live_data(pair):
-    symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
-    if "/" not in symbol and len(symbol) == 6:
-        symbol = symbol[:3] + "/" + symbol[3:]
-    
-    timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
-    data_text = ""
-    
-    for tf_name, tf_code in timeframes.items():
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=2&apikey={TWELVEDATA_API_KEY}"
-        try:
-            res = requests.get(url, timeout=10).json()
-            if 'values' in res:
-                data_text += f"--- {tf_name} ---\n"
-                for c in res['values']:
-                    data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
-            else:
-                return f"TWELVEDATA ERROR: {res.get('message', 'Pair galat hai')}"
-        except Exception as e:
-            return f"DATA NETWORK ERROR: {str(e)}"
-    return data_text
-
-def get_ai_analysis(pair, live_data):
-    url = "https://api.deepseek.com/chat/completions"
-    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-    prompt = f"Pair: {pair}\nData:\n{live_data}\nRules:\n{SMC_RULES}\nReply in SHORT Roman Urdu bullet points: Bias, Direction, Status, Entry, SL, TP, Alert Level."
-    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
-    
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=30).json()
-        if 'choices' not in res:
-            return f"DEEPSEEK ERROR: {str(res)}"
-        return res['choices'][0]['message']['content']
-    except Exception as e:
-        return f"AI NETWORK ERROR: {str(e)}"
+        print("ERROR:", e)
 
 @app.route('/', methods=['GET'])
 def home():
@@ -79,7 +30,6 @@ def webhook():
 
     elif request.method == 'POST':
         data = request.json
-        user_number = None
         try:
             if data.get('object') == 'whatsapp_business_account':
                 for entry in data.get('entry', []):
@@ -89,33 +39,13 @@ def webhook():
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
                                 user_number = msg['from']
-                                user_message = msg['text']['body'].strip().upper()
+                                user_message = msg['text']['body']
                                 
-                                pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
-                                
-                                if len(pair) < 3:
-                                    send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
-                                    return "OK", 200
-                                
-                                live_data = get_live_data(pair)
-                                # Agar data lene mein error aya to error bhej do
-                                if "ERROR" in live_data:
-                                    send_whatsapp_message(user_number, live_data)
-                                    return "OK", 200
-                                    
-                                analysis = get_ai_analysis(pair, live_data)
-                                # Agar AI mein error aya to error bhej do
-                                if "ERROR" in analysis:
-                                    send_whatsapp_message(user_number, analysis)
-                                    return "OK", 200
-
-                                # Sab theek ho to analysis bhej do
-                                send_whatsapp_message(user_number, analysis)
-                                
+                                # SIRF ECHO TEST (Bina AI ke)
+                                token_check = WHATSAPP_TOKEN[:10] if WHATSAPP_TOKEN else "MISSING"
+                                send_msg(user_number, f"Echo: {user_message}\nToken: {token_check}...")
         except Exception as e:
-            # Agar system crash ho, to error bhej do
-            if user_number:
-                send_whatsapp_message(user_number, f"SYSTEM CRASH: {str(e)}")
+            print("CRASH:", e)
         return "OK", 200
 
 if __name__ == '__main__':
