@@ -4,26 +4,23 @@ import os
 
 app = Flask(__name__)
 
-# DIRECT TOKENS (Taake koi env variable ka masla na ho)
+# DIRECT WHATSAPP TOKENS (Jo abhi test mein kaam kar chuke hain)
 WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
 PHONE_NUMBER_ID = "1443823042139151"
 VERIFY_TOKEN = "my_secret_forex_bot_123"
 
+# ENVIRONMENT SE KEYS
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
+
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {"body": text}
-    }
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
-        # Yahan hum Meta ka jawab check karenge
-        response = requests.post(url, headers=headers, json=payload)
-        return response.text
+        requests.post(url, headers=headers, json=payload)
     except Exception as e:
-        return f"SEND_EXCEPTION: {str(e)}"
+        print(f"SEND ERROR: {e}")
 
 @app.route('/', methods=['GET'])
 def home():
@@ -49,21 +46,41 @@ def webhook():
                                 user_number = msg['from']
                                 user_message = msg['text']['body']
                                 
-                                # Seedha reply bhejne ki koshish
-                                reply_text = f"Aapne bheja: {user_message}"
-                                meta_response = send_whatsapp_message(user_number, reply_text)
+                                # 1. TWELVEDATA TEST
+                                if not TWELVEDATA_API_KEY:
+                                    send_whatsapp_message(user_number, "ERROR: TWELVEDATA_API_KEY Render mein nahi mili!")
+                                    return "OK", 200
                                 
-                                # META KA JAWAB WAPIS WHATSAPP PAR BHEJENGE (Taake error pata chale)
-                                # (Yeh ek backup message hai jo bot ki taraf se aayega)
-                                if "error" in meta_response:
-                                    send_whatsapp_message(user_number, f"META ERROR: {meta_response}")
-                                    
+                                td_url = f"https://api.twelvedata.com/price?symbol=XAU/USD&apikey={TWELVEDATA_API_KEY}"
+                                td_res = requests.get(td_url).json()
+                                
+                                if 'price' not in td_res:
+                                    send_whatsapp_message(user_number, f"TWELVEDATA ERROR: {str(td_res)}")
+                                    return "OK", 200
+                                
+                                # 2. DEEPSEEK TEST
+                                if not DEEPSEEK_API_KEY:
+                                    send_whatsapp_message(user_number, "ERROR: DEEPSEEK_API_KEY Render mein nahi mili!")
+                                    return "OK", 200
+                                
+                                ai_url = "https://api.deepseek.com/chat/completions"
+                                ai_headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+                                ai_payload = {
+                                    "model": "deepseek-chat",
+                                    "messages": [{"role": "user", "content": f"Say 'API is working' in Urdu."}],
+                                    "temperature": 0.1
+                                }
+                                ai_res = requests.post(ai_url, headers=ai_headers, json=ai_payload).json()
+                                
+                                if 'choices' not in ai_res:
+                                    send_whatsapp_message(user_number, f"DEEPSEEK ERROR: {str(ai_res)}")
+                                    return "OK", 200
+                                
+                                # AGAR DONO THEEK HAIN
+                                send_whatsapp_message(user_number, f"✅ DONO API THEEK HAIN!\nTwelveData Price: {td_res['price']}\nAI Response: {ai_res['choices'][0]['message']['content']}")
+                                
         except Exception as e:
-            # Agar code crash ho, to error message bhejo
-            try:
-                send_whatsapp_message(user_number, f"CODE CRASH: {str(e)}")
-            except:
-                pass
+            print(f"WEBHOOK ERROR: {e}")
         return "OK", 200
 
 if __name__ == '__main__':
