@@ -46,7 +46,6 @@ def get_live_data(pair):
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                # Simple Error Message for Invalid/Paid Pairs
                 return None, f"❌ Bhai, {symbol} ka data free API par available nahi hai."
         except Exception as e:
             return None, f"❌ Network error aya hai. Thori der baad try karein."
@@ -62,21 +61,23 @@ def get_ai_analysis(pair, live_data, current_price):
     Current Price: {current_price}
     Live Data (W, D, 1H, 5M):\n{live_data}\n
     
-    Instructions:
-    1. Analyze strictly based on SMC rules (OB, FVG, MSS, Liquidity).
-    2. For the "📝 Report" line, look at the Daily (D) data and tell me: Is the market moving from POI to Liquidity, or Liquidity to POI? And what is the nearest level (Liquidity or POI)? Write this in 1-2 short lines in Roman Urdu.
-    3. If there is an entry, provide Entry, SL, TP, and a 1-line SMC Reason in Roman Urdu.
-    4. If there is NO entry, provide the Alert Level (price to break) and say "Break ka intezar".
-    5. Do NOT change the emojis, structure, or write any extra text.
-    
+    STRICT RULES:
+    1. NEVER trade against the Daily Trend. If Daily is Bearish, only look for SELL. If Bullish, only look for BUY.
+    2. Look for 1H POI (OB + FVG) OR 1H Liquidity Sweep.
+    3. Entry confirmation MUST be 5M MSS + Displacement + 5M POI Retest.
+    4. VOCABULARY LOCK: ONLY use these words: POI, Order Block (OB), FVG, MSS, Displacement, Liquidity, BOS, CHoCH. NEVER use Supply, Demand, Support, or Resistance.
+    5. For the "Report", explain the sequence: Did market sweep 1H Liquidity or tap 1H POI? Is 5M MSS confirmed? Is it aligned with Daily trend?
+    6. Alert Level MUST be near the current price (based on 1H or 5M structure), not far away.
+    7. NO INTRO, NO OUTRO. Output EXACTLY in this format:
+
     Format for ENTRY:
     🪙 {pair}
     📍 Current: {current_price}
-    📝 Report: [Daily TF context: Market kahan se nikli hai, nazdeek ka level kya hai]
+    📝 Report: [1-2 lines about 1H Liquidity/POI, Daily Trend alignment, and 5M confirmation]
     [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
     📊 1H: [Bullish/Bearish/Consolidation]
     ✅ Status: ENTRY
-    💡 Reason: [Short SMC reason in Roman Urdu]
+    💡 Reason: [1 short SMC reason, e.g., 1H Liquidity Sweep + 5M CHoCH]
     🎯 Entry: [Price]
     🛑 SL: [Price]
     💰 TP: [Price]
@@ -85,7 +86,7 @@ def get_ai_analysis(pair, live_data, current_price):
     Format for NO TRADE:
     🪙 {pair}
     📍 Current: {current_price}
-    📝 Report: [Daily TF context: Market kahan se nikli hai, nazdeek ka level kya hai]
+    📝 Report: [1-2 lines about 1H Liquidity/POI, Daily Trend alignment, and 5M confirmation]
     [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
     📊 1H: [Bullish/Bearish/Consolidation]
     🚫 Status: NO TRADE
@@ -153,7 +154,7 @@ def webhook():
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip().upper()
                                 
-                                # Thread Start
+                                # Start Background Thread
                                 thread = threading.Thread(target=process_message, args=(user_number, user_message))
                                 thread.start()
                                 
