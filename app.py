@@ -1,31 +1,121 @@
 from flask import Flask, request
 import requests
 import os
+import threading
 
 app = Flask(__name__)
 
 # ==========================================
-# WHATSAPP TOKENS HARDCODED (Taake reply 100% aaye)
+# 100% SECURE: SIRF RENDER VARIABLES SE
 # ==========================================
-HARD_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
-HARD_ID = "1443823042139151"
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
-# ==========================================
-# ENVIRONMENT VARIABLES SE READ KARNA
-# ==========================================
-ENV_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
-ENV_ID = os.environ.get("PHONE_NUMBER_ID", "")
-ENV_DEEP = os.environ.get("DEEPSEEK_API_KEY", "")
-ENV_TWELVE = os.environ.get("TWELVEDATA_API_KEY", "")
-
-def send_hardcoded_whatsapp(to, text):
-    url = f"https://graph.facebook.com/v20.0/{HARD_ID}/messages"
-    headers = {"Authorization": f"Bearer {HARD_TOKEN}", "Content-Type": "application/json"}
+def send_whatsapp_message(to, text):
+    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
+        print("ERROR: Missing Tokens in Render Environment!")
+        return
+    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
-        requests.post(url, headers=headers, json=payload, timeout=10)
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        print("META RESPONSE:", res.text)
     except Exception as e:
         print("SEND ERROR:", e)
+
+def get_live_data(pair):
+    symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
+    if "/" not in symbol and len(symbol) == 6:
+        symbol = symbol[:3] + "/" + symbol[3:]
+    
+    timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
+    data_text = ""
+    current_price = 0
+    
+    for tf_name, tf_code in timeframes.items():
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=2&apikey={TWELVEDATA_API_KEY}"
+        try:
+            res = requests.get(url, timeout=10).json()
+            if 'values' in res:
+                if tf_code == "5min":
+                    current_price = res['values'][0]['close']
+                
+                data_text += f"--- {tf_name} ---\n"
+                for c in res['values']:
+                    data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
+            else:
+                return None, f"TWELVEDATA ERROR: {res.get('message', 'Pair galat hai')}"
+        except Exception as e:
+            return None, f"DATA NETWORK ERROR: {str(e)}"
+    return data_text, current_price
+
+def get_ai_analysis(pair, live_data, current_price):
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+    
+    prompt = f"""
+    Pair: {pair}
+    Current Price: {current_price}
+    Live Data:\n{live_data}\n
+    
+    Format (Strictly follow, no intro, no outro):
+    * Weekly Direction: [Bullish/Bearish]
+    * Daily Direction: [Bullish/Bearish]
+    * 1H Structure: [Bullish/Bearish/Consolidation]
+    * Status: [ENTRY / NO TRADE]
+    
+    (If Status is ENTRY):
+    * Entry Reason: [1 line]
+    * Entry: [Price]
+    * SL: [Price]
+    * TP: [Price]
+    * RR: 1:3
+    
+    (If Status is NO TRADE):
+    * Alert Level: [Price]
+    * Reason: [1 line]
+    """
+    
+    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+    
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=25).json()
+        if 'choices' not in res:
+            return f"DEEPSEEK ERROR: {str(res)}"
+        return res['choices'][0]['message']['content']
+    except Exception as e:
+        return f"AI NETWORK ERROR: {str(e)}"
+
+# ==========================================
+# BACKGROUND PROCESS (Timeout Fix)
+# ==========================================
+def process_message(user_number, user_message):
+    try:
+        greetings = ["HI", "HELLO", "HELO", "SALAM", "AO", "START", "HEY"]
+        if user_message in greetings:
+            send_whatsapp_message(user_number, "🤖 *Forex SMC Bot Active!*\n\nMujhe kisi bhi pair ka naam bhejein (jaise GOLD, EURUSD).")
+            return
+            
+        pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
+        
+        if len(pair) < 4:
+            send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
+            return
+        
+        live_data, current_price = get_live_data(pair)
+        if not live_data:
+            send_whatsapp_message(user_number, current_price) # Error
+            return
+            
+        analysis = get_ai_analysis(pair, live_data, current_price)
+        send_whatsapp_message(user_number, analysis)
+        
+    except Exception as e:
+        send_whatsapp_message(user_number, f"SYSTEM ERROR: {str(e)}")
 
 @app.route('/', methods=['GET'])
 def home():
@@ -34,7 +124,7 @@ def home():
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
-        if request.args.get('hub.verify_token') == "my_secret_forex_bot_123":
+        if request.args.get('hub.verify_token') == VERIFY_TOKEN:
             return request.args.get('hub.challenge'), 200
         return "Forbidden", 403
 
@@ -49,20 +139,14 @@ def webhook():
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
                                 user_number = msg['from']
+                                user_message = msg['text']['body'].strip().upper()
                                 
-                                # YEH RENDER SE READ KI HUI VALUES HAIN
-                                report = "🔍 **VARIABLES CHECK**\n\n"
-                                report += f"Token starts with: `{ENV_TOKEN[:10]}`\n"
-                                report += f"Token length: `{len(ENV_TOKEN)}`\n\n"
-                                report += f"ID starts with: `{ENV_ID[:5]}`\n"
-                                report += f"ID length: `{len(ENV_ID)}`\n\n"
-                                report += f"DeepSeek starts with: `{ENV_DEEP[:5]}`\n"
-                                report += f"TwelveData starts with: `{ENV_TWELVE[:5]}`"
-                                
-                                send_hardcoded_whatsapp(user_number, report)
+                                # Meta ko foran OK, kaam background mein
+                                thread = threading.Thread(target=process_message, args=(user_number, user_message))
+                                thread.start()
                                 
         except Exception as e:
-            print("CRASH:", e)
+            print("WEBHOOK CRASH:", e)
         return "OK", 200
 
 if __name__ == '__main__':
