@@ -1,37 +1,29 @@
 from flask import Flask, request
 import requests
 import os
-import re
 
 app = Flask(__name__)
 
 # ==========================================
-# SMART KEY CLEANER (Spaces, newlines aur quotes saaf karne ke liye)
+# WHATSAPP TOKENS HARDCODED (Taake reply 100% aaye)
 # ==========================================
-def clean_env(var_name):
-    val = os.environ.get(var_name, "")
-    if not val:
-        return ""
-    # Sirf letters, numbers, aur valid symbols rakhega, spaces aur newlines hata dega
-    return re.sub(r'\s+', '', val).replace('"', '').replace("'", "")
+HARD_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
+HARD_ID = "1443823042139151"
 
-WHATSAPP_TOKEN = clean_env("WHATSAPP_TOKEN")
-PHONE_NUMBER_ID = clean_env("PHONE_NUMBER_ID")
-VERIFY_TOKEN = "my_secret_forex_bot_123"
-DEEPSEEK_API_KEY = clean_env("DEEPSEEK_API_KEY")
-TWELVEDATA_API_KEY = clean_env("TWELVEDATA_API_KEY")
+# ==========================================
+# ENVIRONMENT VARIABLES SE READ KARNA
+# ==========================================
+ENV_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
+ENV_ID = os.environ.get("PHONE_NUMBER_ID", "")
+ENV_DEEP = os.environ.get("DEEPSEEK_API_KEY", "")
+ENV_TWELVE = os.environ.get("TWELVEDATA_API_KEY", "")
 
-def send_whatsapp_message(to, text):
-    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
-        print("ERROR: Tokens missing!")
-        return
-        
-    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+def send_hardcoded_whatsapp(to, text):
+    url = f"https://graph.facebook.com/v20.0/{HARD_ID}/messages"
+    headers = {"Authorization": f"Bearer {HARD_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        print("META RESPONSE:", res.text) # Logs mein asli error dikhega
+        requests.post(url, headers=headers, json=payload, timeout=10)
     except Exception as e:
         print("SEND ERROR:", e)
 
@@ -42,13 +34,12 @@ def home():
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
-        if request.args.get('hub.verify_token') == VERIFY_TOKEN:
+        if request.args.get('hub.verify_token') == "my_secret_forex_bot_123":
             return request.args.get('hub.challenge'), 200
         return "Forbidden", 403
 
     elif request.method == 'POST':
         data = request.json
-        user_number = None
         try:
             if data.get('object') == 'whatsapp_business_account':
                 for entry in data.get('entry', []):
@@ -58,14 +49,17 @@ def webhook():
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
                                 user_number = msg['from']
-                                user_message = msg['text']['body'].strip()
                                 
-                                # Check agar environment variable sahi load hua hai
-                                if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
-                                    return "OK", 200
+                                # YEH RENDER SE READ KI HUI VALUES HAIN
+                                report = "🔍 **VARIABLES CHECK**\n\n"
+                                report += f"Token starts with: `{ENV_TOKEN[:10]}`\n"
+                                report += f"Token length: `{len(ENV_TOKEN)}`\n\n"
+                                report += f"ID starts with: `{ENV_ID[:5]}`\n"
+                                report += f"ID length: `{len(ENV_ID)}`\n\n"
+                                report += f"DeepSeek starts with: `{ENV_DEEP[:5]}`\n"
+                                report += f"TwelveData starts with: `{ENV_TWELVE[:5]}`"
                                 
-                                # 1. Immediate Echo Test
-                                send_whatsapp_message(user_number, f"System Active.\nAapne likha: {user_message}\nToken length: {len(WHATSAPP_TOKEN)}")
+                                send_hardcoded_whatsapp(user_number, report)
                                 
         except Exception as e:
             print("CRASH:", e)
