@@ -5,73 +5,20 @@ import os
 app = Flask(__name__)
 
 # ==========================================
-# KEYS RENDER SE UTHAYI JAYENGI (100% SECURE)
+# WHATSAPP TOKENS HARDCODED (Taake reply pakka aaye)
 # ==========================================
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+HARD_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
+HARD_ID = "1443823042139151"
+VERIFY_TOKEN = "my_secret_forex_bot_123"
 
-SMC_RULES = """
-You are a strict SMC/ICT Forex Day Trading Bot. 
-Analyze based ONLY on these rules:
-1. Setup: 1H POI -> 5M Entry.
-2. Bias: Monthly/Weekly/Daily (Bada timeframe jeetega).
-3. POI: Order Block with FVG. Buy = Discount zone, Sell = Premium zone.
-4. Entry: 1H POI Tap + 5M MSS + Displacement + Retest.
-5. SL: 5M POI + buffer. TP: 1H liquidity.
-6. RR: Strict 1:3. Agar 1:3 nahi ban rahi to NO TRADE.
-7. If NO TRADE, provide the exact 'Alert Level' (price).
-"""
-
-def send_whatsapp_message(to, text):
-    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
-        print("ERROR: WhatsApp Tokens missing!")
-        return
-    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+def send_hardcoded_whatsapp(to, text):
+    url = f"https://graph.facebook.com/v20.0/{HARD_ID}/messages"
+    headers = {"Authorization": f"Bearer {HARD_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
         requests.post(url, headers=headers, json=payload, timeout=10)
     except Exception as e:
         print("SEND ERROR:", e)
-
-def get_live_data(pair):
-    symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
-    if "/" not in symbol and len(symbol) == 6:
-        symbol = symbol[:3] + "/" + symbol[3:]
-    
-    timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
-    data_text = ""
-    
-    for tf_name, tf_code in timeframes.items():
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=3&apikey={TWELVEDATA_API_KEY}"
-        try:
-            res = requests.get(url, timeout=10).json()
-            if 'values' in res:
-                data_text += f"--- {tf_name} ---\n"
-                for c in res['values']:
-                    data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
-            else:
-                return f"DATA ERROR ({symbol}): {res.get('message', 'Check Pair Name')}"
-        except Exception as e:
-            return f"NETWORK ERROR: {str(e)}"
-    return data_text
-
-def get_ai_analysis(pair, live_data):
-    url = "https://api.deepseek.com/chat/completions"
-    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-    prompt = f"Pair: {pair}\nLive Data:\n{live_data}\nRules:\n{SMC_RULES}\nReply in SHORT Roman Urdu bullet points: Bias, Direction, Status, Entry, SL, TP, Alert Level."
-    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
-    
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=30).json()
-        if 'choices' not in res:
-            return f"DEEPSEEK API ERROR: {str(res)}"
-        return res['choices'][0]['message']['content']
-    except Exception as e:
-        return f"AI CODE ERROR: {str(e)}"
 
 @app.route('/', methods=['GET'])
 def home():
@@ -95,29 +42,23 @@ def webhook():
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
                                 user_number = msg['from']
-                                user_message = msg['text']['body'].strip().upper()
                                 
-                                # Agar keys Render se load nahi huin, to WhatsApp par error batayega
-                                if not DEEPSEEK_API_KEY:
-                                    send_whatsapp_message(user_number, "❌ ERROR: DEEPSEEK_API_KEY Render mein nahi mili!")
-                                    return "OK", 200
-                                if not TWELVEDATA_API_KEY:
-                                    send_whatsapp_message(user_number, "❌ ERROR: TWELVEDATA_API_KEY Render mein nahi mili!")
-                                    return "OK", 200
+                                # YAHAN RENDER KE ENV VARIABLES CHECK HO RAHE HAIN
+                                env_wt = os.environ.get("WHATSAPP_TOKEN", "")
+                                env_pid = os.environ.get("PHONE_NUMBER_ID", "")
+                                env_ds = os.environ.get("DEEPSEEK_API_KEY", "")
+                                env_td = os.environ.get("TWELVEDATA_API_KEY", "")
                                 
-                                pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
+                                # Report tayar karna
+                                report = "🔍 RENDER VARIABLES CHECK:\n"
+                                report += f"WHATSAPP_TOKEN: {env_wt[:15] if env_wt else 'MISSING'}\n"
+                                report += f"PHONE_NUMBER_ID: {env_pid if env_pid else 'MISSING'}\n"
+                                report += f"DEEPSEEK_API_KEY: {env_ds[:10] if env_ds else 'MISSING'}\n"
+                                report += f"TWELVEDATA_API_KEY: {env_td[:10] if env_td else 'MISSING'}"
                                 
-                                if len(pair) < 3:
-                                    send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
-                                    return "OK", 200
+                                # Hardcoded token se aapko report bhejna
+                                send_hardcoded_whatsapp(user_number, report)
                                 
-                                live_data = get_live_data(pair)
-                                if live_data.startswith("DATA ERROR") or live_data.startswith("NETWORK ERROR"):
-                                    send_whatsapp_message(user_number, live_data)
-                                    return "OK", 200
-                                    
-                                analysis = get_ai_analysis(pair, live_data)
-                                send_whatsapp_message(user_number, analysis)
         except Exception as e:
             print(f"WEBHOOK CRASH: {e}")
         return "OK", 200
