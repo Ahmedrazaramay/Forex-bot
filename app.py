@@ -5,7 +5,7 @@ import os
 app = Flask(__name__)
 
 # ==========================================
-# 100% SECURE (Saari keys sirf Render se aayengi)
+# 100% SECURE (Saari keys Render se)
 # ==========================================
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
@@ -18,7 +18,8 @@ def send_whatsapp_message(to, text):
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
-        requests.post(url, headers=headers, json=payload, timeout=10)
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        print("META RESPONSE:", res.text) # Logs mein dikhega
     except Exception as e:
         print("SEND ERROR:", e)
 
@@ -38,53 +39,20 @@ def get_live_data(pair):
             if 'values' in res:
                 if tf_code == "5min":
                     current_price = res['values'][0]['close']
-                
                 data_text += f"--- {tf_name} ---\n"
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None, f"DATA ERROR ({symbol}): {res.get('message', 'Pair galat hai')}"
+                return None, f"TWELVEDATA ERROR: {res.get('message', 'Pair galat hai')}"
         except Exception as e:
-            return None, f"NETWORK ERROR: {str(e)}"
-            
+            return None, f"DATA NETWORK ERROR: {str(e)}"
     return data_text, current_price
 
 def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     
-    # SAKHT FORMAT PROMPT (Entry Reason ke sath)
-    prompt = f"""
-    You are an expert SMC/ICT Forex Bot.
-    Pair: {pair}
-    Current Price: {current_price}
-    
-    Live Data:\n{live_data}\n
-    
-    Instructions:
-    1. Analyze ONLY based on SMC rules (Order Block, FVG, MSS, Liquidity).
-    2. DO NOT write any introduction or long paragraphs. Just give the exact output format.
-    3. Use the Current Price ({current_price}) to calculate Entry, SL, and TP.
-    
-    OUTPUT FORMAT (Strictly follow this):
-    
-    * Weekly Direction: [Bullish/Bearish]
-    * Daily Direction: [Bullish/Bearish]
-    * 1H Structure: [Bullish/Bearish/Consolidation]
-    * Status: [ENTRY / NO TRADE]
-    
-    (If Status is ENTRY):
-    * Entry Reason: [1 short line explaining the SMC setup, e.g., 1H FVG + 5M CHoCH]
-    * Entry: [Price]
-    * SL: [Price]
-    * TP: [Price]
-    * RR: 1:3
-    
-    (If Status is NO TRADE):
-    * Alert Level: [Price to break for a valid entry]
-    * Reason: [1 short line in Roman Urdu]
-    """
-    
+    prompt = f"Pair: {pair}\nCurrent Price: {current_price}\nData:\n{live_data}\nGive output in Roman Urdu bullet points: Bias, Direction, Status, Entry, SL, TP, Alert Level."
     payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
     
     try:
@@ -120,28 +88,32 @@ def webhook():
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip().upper()
                                 
-                                greetings = ["HI", "HELLO", "HELO", "SALAM", "AO", "START", "HEY"]
-                                if user_message in greetings:
-                                    send_whatsapp_message(user_number, "🤖 *Forex SMC Bot Active!*\n\nMujhe kisi bhi pair ka naam bhejein (jaise GOLD, EURUSD, GBPUSD).")
-                                    return "OK", 200
+                                # 1. IMMEDIATE ACK (Check if WhatsApp sending works)
+                                send_whatsapp_message(user_number, "⏳ Checking APIs, please wait...")
                                 
+                                if not DEEPSEEK_API_KEY or not TWELVEDATA_API_KEY:
+                                    send_whatsapp_message(user_number, f"❌ ERROR: Keys missing in Render!\nDeepSeek: {bool(DEEPSEEK_API_KEY)}\nTwelveData: {bool(TWELVEDATA_API_KEY)}")
+                                    return "OK", 200
+
                                 pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
                                 
                                 if len(pair) < 4:
-                                    send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
+                                    send_whatsapp_message(user_number, "Bhai valid pair likhein.")
                                     return "OK", 200
                                 
+                                # 2. FETCH DATA
                                 live_data, current_price = get_live_data(pair)
                                 if not live_data:
-                                    send_whatsapp_message(user_number, current_price) 
+                                    send_whatsapp_message(user_number, current_price) # Error message
                                     return "OK", 200
                                     
+                                # 3. AI ANALYSIS
                                 analysis = get_ai_analysis(pair, live_data, current_price)
                                 send_whatsapp_message(user_number, analysis)
                                 
         except Exception as e:
             if user_number:
-                send_whatsapp_message(user_number, f"SYSTEM ERROR: {str(e)}")
+                send_whatsapp_message(user_number, f"SYSTEM CRASH: {str(e)}")
         return "OK", 200
 
 if __name__ == '__main__':
