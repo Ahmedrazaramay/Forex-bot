@@ -4,7 +4,7 @@ import os
 
 app = Flask(__name__)
 
-# WHATSAPP DIRECT TOKENS (Taake reply pakka aaye)
+# DIRECT WHATSAPP TOKENS (Taake connection 100% pakka ho)
 WHATSAPP_TOKEN = "EAAh2AYg1ZArEBS4g4KmM8hSYlqQE9CRuSVhJNZCFO1N7gEkUokQe7o8yT9J2ZBGP7ZC9NYNGduk9931cxzK0ZAZB2uIq43S0BvtpEPEhAG4BgVZAdpeNoBaVenhpLgCT6cnUdGdo9efUEfJdJLsi0W8kZA2bUjEZAYVVRqHaHumFeE2xteVFb8ZB23RrMZBZA93KgMMYggZDZD"
 PHONE_NUMBER_ID = "1443823042139151"
 VERIFY_TOKEN = "my_secret_forex_bot_123"
@@ -49,9 +49,9 @@ def get_live_data(pair):
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return f"TWELVEDATA ERROR: {res.get('message', 'Pair galat hai')}"
-        except Exception as e:
-            return f"DATA NETWORK ERROR: {str(e)}"
+                return None # Data nahi mila
+        except Exception:
+            return None
     return data_text
 
 def get_ai_analysis(pair, live_data):
@@ -93,15 +93,28 @@ def webhook():
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip().upper()
                                 
+                                # 1. GREETINGS FILTER
+                                greetings = ["HI", "HELLO", "HELO", "SALAM", "AO", "START", "HEY"]
+                                if user_message in greetings:
+                                    welcome_msg = (
+                                        "🤖 *Forex SMC Bot Active!*\n\n"
+                                        "Mujhe kisi bhi pair ka naam bhejein (jaise GOLD, EURUSD, GBPUSD, BTCUSD).\n"
+                                        "Main aapko 4 Timeframes (W, D, 1H, 5M) ki SMC analysis dunga."
+                                    )
+                                    send_whatsapp_message(user_number, welcome_msg)
+                                    return "OK", 200
+                                
+                                # 2. PAIR FORMAT & VALIDATION
                                 pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
                                 
-                                if len(pair) < 3:
+                                if len(pair) < 4:
                                     send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
                                     return "OK", 200
                                 
+                                # 3. DATA & ANALYSIS
                                 live_data = get_live_data(pair)
-                                if "ERROR" in live_data:
-                                    send_whatsapp_message(user_number, live_data)
+                                if not live_data:
+                                    send_whatsapp_message(user_number, f"❌ Data nahi mila. Check karein ke '{pair}' sahi pair hai ya nahi.")
                                     return "OK", 200
                                     
                                 analysis = get_ai_analysis(pair, live_data)
@@ -109,7 +122,7 @@ def webhook():
                                 
         except Exception as e:
             if user_number:
-                send_whatsapp_message(user_number, f"SYSTEM CRASH: {str(e)}")
+                send_whatsapp_message(user_number, f"SYSTEM ERROR: {str(e)}")
         return "OK", 200
 
 if __name__ == '__main__':
