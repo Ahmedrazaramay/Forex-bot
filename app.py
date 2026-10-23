@@ -46,9 +46,10 @@ def get_live_data(pair):
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None, f"TWELVEDATA ERROR: {res.get('message', 'Pair galat hai')}"
+                # Simple Error Message for Invalid/Paid Pairs
+                return None, f"❌ Bhai, {symbol} ka data free API par available nahi hai."
         except Exception as e:
-            return None, f"DATA NETWORK ERROR: {str(e)}"
+            return None, f"❌ Network error aya hai. Thori der baad try karein."
     return data_text, current_price
 
 def get_ai_analysis(pair, live_data, current_price):
@@ -56,35 +57,48 @@ def get_ai_analysis(pair, live_data, current_price):
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     
     prompt = f"""
+    You are a strict SMC/ICT Forex Day Trading Bot.
     Pair: {pair}
     Current Price: {current_price}
-    Live Data:\n{live_data}\n
+    Live Data (W, D, 1H, 5M):\n{live_data}\n
     
-    Format (Strictly follow this format, no intro, no outro text):
-    * Weekly Direction: [Bullish/Bearish]
-    * Daily Direction: [Bullish/Bearish]
-    * 1H Structure: [Bullish/Bearish/Consolidation]
-    * Status: [ENTRY / NO TRADE]
+    Instructions:
+    1. Analyze strictly based on SMC rules (OB, FVG, MSS, Liquidity).
+    2. For the "📝 Report" line, look at the Daily (D) data and tell me: Is the market moving from POI to Liquidity, or Liquidity to POI? And what is the nearest level (Liquidity or POI)? Write this in 1-2 short lines in Roman Urdu.
+    3. If there is an entry, provide Entry, SL, TP, and a 1-line SMC Reason in Roman Urdu.
+    4. If there is NO entry, provide the Alert Level (price to break) and say "Break ka intezar".
+    5. Do NOT change the emojis, structure, or write any extra text.
     
-    (If Status is ENTRY):
-    * Entry Reason: [1 short line, e.g., 1H FVG + 5M CHoCH]
-    * Entry: [Price]
-    * SL: [Price]
-    * TP: [Price]
-    * RR: 1:3
-    
-    (If Status is NO TRADE):
-    * Alert Level: [Price]
-    * Reason: [1 short line explaining what to wait for]
+    Format for ENTRY:
+    🪙 {pair}
+    📍 Current: {current_price}
+    📝 Report: [Daily TF context: Market kahan se nikli hai, nazdeek ka level kya hai]
+    [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
+    📊 1H: [Bullish/Bearish/Consolidation]
+    ✅ Status: ENTRY
+    💡 Reason: [Short SMC reason in Roman Urdu]
+    🎯 Entry: [Price]
+    🛑 SL: [Price]
+    💰 TP: [Price]
+    ⚖️ RR: 1:3
+
+    Format for NO TRADE:
+    🪙 {pair}
+    📍 Current: {current_price}
+    📝 Report: [Daily TF context: Market kahan se nikli hai, nazdeek ka level kya hai]
+    [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
+    📊 1H: [Bullish/Bearish/Consolidation]
+    🚫 Status: NO TRADE
+    🎯 Alert: [Price] Break ka intezar
     """
     
-    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0}
     
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=25).json()
         if 'choices' not in res:
             return f"DEEPSEEK ERROR: {str(res)}"
-        return res['choices'][0]['message']['content']
+        return res['choices'][0]['message']['content'].strip()
     except Exception as e:
         return f"AI NETWORK ERROR: {str(e)}"
 
@@ -139,7 +153,7 @@ def webhook():
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip().upper()
                                 
-                                # THREAD START: Meta ko foran OK, analysis background mein
+                                # Thread Start
                                 thread = threading.Thread(target=process_message, args=(user_number, user_message))
                                 thread.start()
                                 
