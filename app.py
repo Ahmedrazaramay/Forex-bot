@@ -30,7 +30,8 @@ def get_live_data(pair):
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
     
-    timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 30), "5M": ("5min", 30)}
+    # UPDATED DATA SIZES: W(30), D(30), 1H(60), 5M(60)
+    timeframes = {"W": ("1week", 30), "D": ("1day", 30), "1H": ("1h", 60), "5M": ("5min", 60)}
     data_text = ""
     current_price = 0
     
@@ -80,19 +81,6 @@ def get_ai_analysis(pair, live_data, current_price):
     💡 Reason: [1 short SMC reason in Roman Urdu]
     """
     
-    # Agar entry hai to ye add karega
-    entry_format = """
-    🎯 Entry: [Price]
-    🛑 SL: [Price]
-    💰 TP: [Price]
-    ⚖️ RR: 1:3
-    """
-    
-    # Agar no trade hai to ye add karega
-    no_trade_format = """
-    🎯 Alert: [Price] [Break/Tap] ka intezar
-    """
-
     full_prompt = f"""
     {master_prompt}
     (If Status is ENTRY, output Entry/SL/TP/RR. If NO TRADE, output Alert).
