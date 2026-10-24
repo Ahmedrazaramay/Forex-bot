@@ -21,6 +21,9 @@ def send_whatsapp_message(to, text):
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
     try:
+        # WhatsApp text limit (4096 chars) ko handle karne ke liye split (just in case)
+        if len(text) > 4000:
+            text = text[:4000] + "\n...[Message Truncated]"
         requests.post(url, headers=headers, json=payload, timeout=10)
     except Exception as e:
         print("SEND ERROR:", e)
@@ -30,7 +33,7 @@ def get_live_data(pair):
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
     
-    # Yahan humne outputsize set kar diya hai (30 for 1H/5M, 20 for W/D)
+    # Aapke rules ke mutabiq data size
     timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 30), "5M": ("5min", 30)}
     data_text = ""
     current_price = 0
@@ -56,47 +59,126 @@ def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     
-    prompt = f"""
-    You are a strict SMC/ICT Forex Day Trading Bot.
-    Pair: {pair}
-    Current Price: {current_price}
-    Live Data (W, D, 1H, 5M):\n{live_data}\n
-    
-    STRICT RULES:
-    1. NEVER trade against the Daily Trend. 
-    2. Look for 1H POI (OB + FVG) OR 1H Liquidity Sweep.
-    3. Entry confirmation MUST be 5M MSS + Displacement + 5M POI Retest.
-    4. VOCABULARY LOCK: ONLY use POI, Order Block (OB), FVG, MSS, Displacement, Liquidity, BOS, CHoCH. NEVER use Supply, Demand, Support, or Resistance.
-    5. For SL and TP, calculate realistic pips based on the pair. 
-    6. NO INTRO, NO OUTRO. Output EXACTLY in this format:
+    # AAPKA DIYA HUA EXACT PROMPT
+    master_prompt = """
+Aap ek SMC/ICT-based forex DAY TRADING bot hain.
+Setup: 1H POI → 5M Entry | RR 1:3 ONLY | Pair Behavior Aware.
 
-    Format for ENTRY:
-    🪙 {pair}
-    📍 Current: {current_price}
-    📝 Report: [1-2 lines about 1H Liquidity/POI, Daily Trend alignment, and 5M confirmation]
-    [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
-    📊 1H: [Bullish/Bearish/Consolidation]
-    ✅ Status: ENTRY
-    💡 Reason: [1 short SMC reason, e.g., 1H Liquidity Sweep + 5M CHoCH]
-    🎯 Entry: [Price]
-    🛑 SL: [Price]
-    💰 TP: [Price]
-    ⚖️ RR: 1:3
+STRICT RULES:
 
-    Format for NO TRADE:
-    🪙 {pair}
-    📍 Current: {current_price}
-    📝 Report: [1-2 lines about 1H Liquidity/POI, Daily Trend alignment, and 5M confirmation]
-    [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
-    📊 1H: [Bullish/Bearish/Consolidation]
-    🚫 Status: NO TRADE
-    🎯 Alert: [Price] Break ka intezar
+0. PAIR BEHAVIOR (har analysis se pehle):
+   - Analyze pair ka behavior profile
+   - Volatility, breakaway gap, gap imbalance, sessions
+   - Spread check, backtest status
+   - IF pair behavior incomplete → WARNING / NO TRADE
+
+1. SIRF course (Part 1–11) ke rules use karo.
+   Kuch add mat karo.
+
+2. Analysis TOP-DOWN order mein:
+   Step 0: Pair Behavior Profile
+   Step 1: Bias (Monthly → Weekly → Daily)
+   Step 2: Key Levels (1H POI + 1H Liquidity)
+   Step 3: Entry (5M MSS + Displacement + Retest)
+   Step 4: Pair-Specific Behavior Check
+   Step 5: RR Calculation (1:3 only)
+   Step 6: Final Decision
+
+3. Day Trading Fix: 1H POI + 5M entry (change nahi).
+
+4. Bias: Monthly/Weekly/Daily.
+   Conflict → bada TF jeete.
+   Sirf Main Bias (POI→Liquidity). Reversal avoid.
+
+5. 1H POI valid = OB with FVG.
+   Buy=Discount, Sell=Premium.
+
+6. 5M confirmation (all 4 required):
+   - 1H POI tap
+   - 5M MSS (last swing break, sweep OK)
+   - 5M Displacement (FVG+OB)
+   - 5M last POI retest
+
+7. SL = 5M POI ± buffer.
+   TP = 1H nearest liquidity.
+
+8. RR RULE (STRICT):
+   - Sirf 1:3 RR wali entry (±0.1 tolerance)
+   - IF RR != 1:3 → NO TRADE
+   - TP artificially adjust nahi karna
+   - Agar 1H liquidity se 1:3 nahi banti → skip
+
+9. PAIR BEHAVIOR RULES:
+   - Breakaway gap: gold=no_fill, bitcoin=fill, forex=fill
+   - Gap imbalance: forex/crypto=skip, indian=apply
+   - Killzones: forex/gold/crypto=yes, indian=no
+   - Volatility: daily_range < 50 pips → NO TRADE
+   - Spread: > SL_distance × 0.1 → NO TRADE
+   - Bitcoin: expect long consolidations
+   - Gold: expect clean trends
+   - Forex: session-dependent
+
+10. Avoid: Bias against, sideways, trap, invalid POI,
+    incomplete confirmation, RR != 1:3, pair behavior
+    mismatch.
+
+OUTPUT FORMAT (isi order mein):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 0: PAIR BEHAVIOR
+Pair: [name] | Daily Range: [pips]
+Volatility: HIGH/MED/LOW | 1:3 RR Feasible: YES/NO
+Breakaway Gap: [fill/no fill] | Gap Imbalance: [skip/apply]
+Killzones: [yes/no] | Best Session: [NY/London/Asian]
+Spread Check: PASS/FAIL | Notable: [1 line]
+
+STEP 1: BIAS
+Monthly: [dir] | Weekly: [dir] | Daily: [dir]
+Final Bias: [dir] | Reason: [1 line]
+
+STEP 2: KEY LEVELS (1H)
+POI Type: [type] | Zone: [price] | Valid: YES/NO
+Location: Discount/Premium
+TP Liquidity: [price] ([pips] away)
+
+STEP 3: ENTRY CONFIRMATION (5M)
+1H POI Tap: YES/NO
+5M MSS: YES/NO
+5M Displacement: YES/NO
+5M Last POI Retest: YES/NO
+
+STEP 4: PAIR BEHAVIOR CHECK
+Breakaway Gap Expected: [fill/no fill]
+Gap Imbalance: [skip/apply]
+Session Filter: [valid/skip]
+Volatility Confirm: [YES/NO]
+
+STEP 5: RR CALCULATION
+Entry: [price] | SL: [price] ([pips])
+TP: [price] ([pips]) | RR: 1:X
+Required: 1:3 | Status: PASS/FAIL
+
+STEP 6: FINAL DECISION
+Direction: BUY/SELL/NO TRADE
+Entry: [price] | SL: [price] | TP: [price]
+RR: 1:3 ✅
+Confidence: HIGH/MEDIUM/LOW
+Pair Context: [why this pair fits]
+Reason: [2-3 lines Urdu]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AGAR pair behavior mismatch ya RR != 1:3 → NO TRADE.
+SIRF confirmed + 1:3 RR + pair behavior matched
+entries do. Jhooti trades nahi.
+KHUD SE KUCH ADD NAHI KARNA.
     """
     
-    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0}
+    # Data inject karna prompt ke aakhir mein
+    full_prompt = f"{master_prompt}\n\n--- LIVE DATA FOR ANALYSIS ---\nPair: {pair}\nCurrent Price: {current_price}\nLive Data:\n{live_data}"
+    
+    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": full_prompt}], "temperature": 0.0}
     
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=25).json()
+        res = requests.post(url, headers=headers, json=payload, timeout=45).json() # Timeout barha diya kyunke output lamba hai
         if 'choices' not in res:
             return f"DEEPSEEK ERROR: {str(res)}"
         return res['choices'][0]['message']['content'].strip()
