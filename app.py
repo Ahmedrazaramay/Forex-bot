@@ -30,12 +30,13 @@ def get_live_data(pair):
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
     
-    timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
+    # Yahan humne outputsize set kar diya hai (30 for 1H/5M, 20 for W/D)
+    timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 30), "5M": ("5min", 30)}
     data_text = ""
     current_price = 0
     
-    for tf_name, tf_code in timeframes.items():
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=2&apikey={TWELVEDATA_API_KEY}"
+    for tf_name, (tf_code, tf_size) in timeframes.items():
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize={tf_size}&apikey={TWELVEDATA_API_KEY}"
         try:
             res = requests.get(url, timeout=10).json()
             if 'values' in res:
@@ -62,13 +63,12 @@ def get_ai_analysis(pair, live_data, current_price):
     Live Data (W, D, 1H, 5M):\n{live_data}\n
     
     STRICT RULES:
-    1. NEVER trade against the Daily Trend. If Daily is Bearish, only look for SELL. If Bullish, only look for BUY.
+    1. NEVER trade against the Daily Trend. 
     2. Look for 1H POI (OB + FVG) OR 1H Liquidity Sweep.
     3. Entry confirmation MUST be 5M MSS + Displacement + 5M POI Retest.
-    4. VOCABULARY LOCK: ONLY use these words: POI, Order Block (OB), FVG, MSS, Displacement, Liquidity, BOS, CHoCH. NEVER use Supply, Demand, Support, or Resistance.
-    5. For the "Report", explain the sequence: Did market sweep 1H Liquidity or tap 1H POI? Is 5M MSS confirmed? Is it aligned with Daily trend?
-    6. Alert Level MUST be near the current price (based on 1H or 5M structure), not far away.
-    7. NO INTRO, NO OUTRO. Output EXACTLY in this format:
+    4. VOCABULARY LOCK: ONLY use POI, Order Block (OB), FVG, MSS, Displacement, Liquidity, BOS, CHoCH. NEVER use Supply, Demand, Support, or Resistance.
+    5. For SL and TP, calculate realistic pips based on the pair. 
+    6. NO INTRO, NO OUTRO. Output EXACTLY in this format:
 
     Format for ENTRY:
     🪙 {pair}
