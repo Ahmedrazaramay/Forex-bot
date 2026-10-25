@@ -23,9 +23,6 @@ TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 
-# ==========================================
-# WHATSAPP FUNCTIONS
-# ==========================================
 def send_whatsapp_text(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
@@ -39,15 +36,12 @@ def send_whatsapp_image(to, image_path, caption):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/media"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
     files = {'file': open(image_path, 'rb')}
-    data = {'messaging_product': 'whatsapp', 'type': 'image/jpeg'} # Changed to JPEG for safety
+    data = {'messaging_product': 'whatsapp', 'type': 'image/jpeg'}
     
     try:
         upload_res = requests.post(url, headers=headers, files=files, data=data, timeout=20).json()
-        print("META UPLOAD RESPONSE:", upload_res)
-        
         if 'id' not in upload_res:
-            print("❌ UPLOAD FAILED BY META.")
-            return False
+            return f"❌ Meta Upload Error: {upload_res}"
         
         media_id = upload_res['id']
         msg_url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
@@ -59,15 +53,10 @@ def send_whatsapp_image(to, image_path, caption):
             "image": {"id": media_id, "caption": caption}
         }
         res = requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
-        print("META IMAGE SEND RESPONSE:", res.text)
-        return True
+        return "SUCCESS"
     except Exception as e:
-        print("IMAGE SEND EXCEPTION:", e)
-        return False
+        return f"❌ Image Send Exception: {str(e)}"
 
-# ==========================================
-# CHART GENERATION
-# ==========================================
 def generate_chart(pair, ai_text, current_price):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
@@ -77,8 +66,7 @@ def generate_chart(pair, ai_text, current_price):
     try:
         res = requests.get(url, timeout=10).json()
         if 'values' not in res:
-            print("CHART DATA ERROR:", res)
-            return None
+            return f"❌ Chart Data Error: {res}"
 
         df = pd.DataFrame(res['values'])
         df['datetime'] = pd.to_datetime(df['datetime'])
@@ -100,23 +88,17 @@ def generate_chart(pair, ai_text, current_price):
         if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
         if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
 
-        chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg" # Save as JPG
+        chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
         
-        # bbox_inches='tight' se chart cut nahi hota
         mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', 
                  hlines=hlines if hlines else None, savefig=dict(fname=chart_path, bbox_inches='tight'))
         
         plt.close('all') 
-        print("CHART GENERATED SUCCESSFULLY:", chart_path)
         return chart_path
     except Exception as e:
-        print("CHART EXCEPTION:", e)
-        return None
+        return f"❌ Chart Exception: {str(e)}"
 
-# ==========================================
-# AI LOGIC
-# ==========================================
 def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
@@ -178,9 +160,6 @@ def get_live_data(pair):
             return None, None
     return data_text, current_price
 
-# ==========================================
-# MAIN LOGIC
-# ==========================================
 def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper()
@@ -226,16 +205,21 @@ def process_message(user_number, user_message):
             
         analysis = get_ai_analysis(pair, live_data, current_price)
         
+        # Chart Check
         chart_path = generate_chart(pair, analysis, current_price)
-        if chart_path:
-            success = send_whatsapp_image(user_number, chart_path, analysis)
-            if not success:
-                print("⚠️ Image send failed, sending text only.")
-                send_whatsapp_text(user_number, analysis) 
-            os.remove(chart_path) 
-        else:
-            print("⚠️ Chart generation failed, sending text only.")
+        
+        if chart_path.startswith("❌"):
+            # Agar chart banne mein error aya
             send_whatsapp_text(user_number, analysis)
+            send_whatsapp_text(user_number, chart_path)
+        else:
+            # Agar chart ban gaya, send karein
+            status = send_whatsapp_image(user_number, chart_path, analysis)
+            if status != "SUCCESS":
+                # Agar Meta ne image reject ki
+                send_whatsapp_text(user_number, analysis)
+                send_whatsapp_text(user_number, status)
+            os.remove(chart_path) 
         
     except Exception as e:
         send_whatsapp_text(user_number, f"SYSTEM ERROR: {str(e)}")
