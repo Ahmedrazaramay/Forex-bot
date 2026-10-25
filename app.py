@@ -2,6 +2,11 @@ from flask import Flask, request
 import requests
 import os
 import threading
+import pandas as pd
+import mplfinance as mpf
+import matplotlib.pyplot as plt
+import re
+import datetime
 
 app = Flask(__name__)
 
@@ -13,13 +18,41 @@ PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
-
-# Yahan aapke Oracle server ka IP dalein
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 
-def send_whatsapp_message(to, text):
-    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
-        return
+# ==========================================
+# WHATSAPP MEDIA UPLOAD & SEND
+# ==========================================
+def send_whatsapp_image(to, image_path, caption):
+    # 1. Upload Image to Meta
+    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/media"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+    files = {'file': open(image_path, 'rb')}
+    data = {'messaging_product': 'whatsapp', 'type': 'image/png'}
+    
+    try:
+        upload_res = requests.post(url, headers=headers, files=files, data=data, timeout=15).json()
+        if 'id' not in upload_res:
+            print("Upload Error:", upload_res)
+            return
+        
+        media_id = upload_res['id']
+        
+        # 2. Send Image Message
+        msg_url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
+        msg_headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "image",
+            "image": {"id": media_id, "caption": caption}
+        }
+        requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
+        
+    except Exception as e:
+        print("Image Send Error:", e)
+
+def send_whatsapp_text(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
@@ -28,6 +61,61 @@ def send_whatsapp_message(to, text):
     except Exception as e:
         print("SEND ERROR:", e)
 
+# ==========================================
+# CHART GENERATION
+# ==========================================
+def generate_chart(pair, ai_text):
+    # Get 5M data for chart
+    symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
+    if "/" not in symbol and len(symbol) == 6:
+        symbol = symbol[:3] + "/" + symbol[3:]
+        
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=5min&outputsize=40&apikey={TWELVEDATA_API_KEY}"
+    res = requests.get(url).json()
+    
+    if 'values' not in res:
+        return None
+
+    # Prepare Data for mplfinance
+    df = pd.DataFrame(res['values'])
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df.set_index('datetime', inplace=True)
+    df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
+    df = df.astype(float)
+    df = df.sort_index()
+
+    # Extract Entry, SL, TP from AI text using Regex
+    entry_val, sl_val, tp_val = None, None, None
+    
+    entry_match = re.search(r"Entry:\s*([\d\.]+)", ai_text, re.IGNORECASE)
+    sl_match = re.search(r"SL:\s*([\d\.]+)", ai_text, re.IGNORECASE)
+    tp_match = re.search(r"TP:\s*([\d\.]+)", ai_text, re.IGNORECASE)
+
+    if entry_match: entry_val = float(entry_match.group(1))
+    if sl_match: sl_val = float(sl_match.group(1))
+    if tp_match: tp_val = float(tp_match.group(1))
+
+    # Configure Chart
+    hlines = []
+    if entry_val: hlines.append(dict(hlines=entry_val, colors='b', linestyle='-', linewidths=1.5))
+    if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
+    if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
+
+    # Generate Chart
+    chart_path = f"/tmp/{symbol.replace('/', '')}_chart.png"
+    title = f"{symbol} - 5M Chart"
+    
+    try:
+        mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', 
+                 hlines=hlines if hlines else None, savefig=chart_path)
+        return chart_path
+    except Exception as e:
+        print("Chart Error:", e)
+        return None
+
+# ==========================================
+# MAIN LOGIC
+# ==========================================
 def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
@@ -75,55 +163,60 @@ def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper()
         
-        # --- ORACLE ALERT LOGIC START ---
-        # Agar user "ALERT GOLD 4050" ya "ALERT 4050" likhe
+        # --- ORACLE ALERT LOGIC ---
         if "ALERT" in msg_upper:
             parts = msg_upper.split()
             price_level = None
-            pair = "XAU/USD" # Default
+            pair = "XAU/USD"
             
             for part in parts:
                 try:
-                    # Check if the part is a number (price)
                     price_level = float(part)
                 except ValueError:
-                    # If not a number, maybe it's a pair name
                     if len(part) >= 3 and part != "ALERT":
                         pair = part
             
             if price_level:
-                # Send request to Oracle server
                 try:
                     oracle_payload = {"symbol": pair, "price": price_level}
                     response = requests.post(ORACLE_API_URL, json=oracle_payload, timeout=10)
                     if response.status_code == 200:
-                        send_whatsapp_message(user_number, f"✅ Alert set on Oracle for {pair} at {price_level}!")
+                        send_whatsapp_text(user_number, f"✅ Alert set on Oracle for {pair} at {price_level}!")
                     else:
-                        send_whatsapp_message(user_number, f"❌ Oracle Error: {response.text}")
+                        send_whatsapp_text(user_number, f"❌ Oracle Error.")
                 except Exception as e:
-                    send_whatsapp_message(user_number, f"❌ Oracle Connection Failed: {str(e)}")
+                    send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
                 return
             else:
-                send_whatsapp_message(user_number, "Format: ALERT GOLD 4050")
+                send_whatsapp_text(user_number, "Format: ALERT GOLD 4050")
                 return
-        # --- ORACLE ALERT LOGIC END ---
+        # --- END ORACLE ALERT LOGIC ---
 
         # Normal AI Analysis
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         if len(pair) < 4:
-            send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
+            send_whatsapp_text(user_number, "Bhai valid pair likhein.")
             return
         
         live_data, current_price = get_live_data(pair)
         if not live_data:
-            send_whatsapp_message(user_number, f"❌ Data not available for {pair}")
+            send_whatsapp_text(user_number, f"❌ Data not available for {pair}")
             return
             
+        send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
+        
         analysis = get_ai_analysis(pair, live_data, current_price)
-        send_whatsapp_message(user_number, analysis)
+        
+        # Chart Generation & Sending
+        chart_path = generate_chart(pair, analysis)
+        if chart_path:
+            send_whatsapp_image(user_number, chart_path, analysis)
+            os.remove(chart_path) # Delete after sending to save space
+        else:
+            send_whatsapp_text(user_number, analysis)
         
     except Exception as e:
-        send_whatsapp_message(user_number, f"SYSTEM ERROR: {str(e)}")
+        send_whatsapp_text(user_number, f"SYSTEM ERROR: {str(e)}")
 
 @app.route('/', methods=['GET'])
 def home():
