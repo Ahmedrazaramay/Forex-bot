@@ -39,14 +39,14 @@ def send_whatsapp_image(to, image_path, caption):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/media"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
     files = {'file': open(image_path, 'rb')}
-    data = {'messaging_product': 'whatsapp', 'type': 'image/png'}
+    data = {'messaging_product': 'whatsapp', 'type': 'image/jpeg'} # Changed to JPEG for safety
     
     try:
         upload_res = requests.post(url, headers=headers, files=files, data=data, timeout=20).json()
-        print("UPLOAD RESPONSE:", upload_res) # Logs ke liye
+        print("META UPLOAD RESPONSE:", upload_res)
         
         if 'id' not in upload_res:
-            print("❌ UPLOAD FAILED. Check logs.")
+            print("❌ UPLOAD FAILED BY META.")
             return False
         
         media_id = upload_res['id']
@@ -59,10 +59,10 @@ def send_whatsapp_image(to, image_path, caption):
             "image": {"id": media_id, "caption": caption}
         }
         res = requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
-        print("IMAGE MSG RESPONSE:", res.text)
+        print("META IMAGE SEND RESPONSE:", res.text)
         return True
     except Exception as e:
-        print("IMAGE SEND ERROR:", e)
+        print("IMAGE SEND EXCEPTION:", e)
         return False
 
 # ==========================================
@@ -82,7 +82,6 @@ def generate_chart(pair, ai_text, current_price):
 
         df = pd.DataFrame(res['values'])
         df['datetime'] = pd.to_datetime(df['datetime'])
-        # Pandas warning fix
         df = df.set_index('datetime')
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df = df.astype(float).sort_index()
@@ -101,27 +100,27 @@ def generate_chart(pair, ai_text, current_price):
         if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
         if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
 
-        chart_path = f"/tmp/{symbol.replace('/', '')}_chart.png"
+        chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg" # Save as JPG
         title = f"{symbol} - 5M"
         
+        # bbox_inches='tight' se chart cut nahi hota
         mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', 
-                 hlines=hlines if hlines else None, savefig=chart_path)
+                 hlines=hlines if hlines else None, savefig=dict(fname=chart_path, bbox_inches='tight'))
         
         plt.close('all') 
-        print("CHART GENERATED:", chart_path)
+        print("CHART GENERATED SUCCESSFULLY:", chart_path)
         return chart_path
     except Exception as e:
         print("CHART EXCEPTION:", e)
         return None
 
 # ==========================================
-# AI LOGIC (STYLISH PROMPT)
+# AI LOGIC
 # ==========================================
 def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     
-    # AAAPKA STYLISH PROMPT
     prompt = f"""
     You are a strict SMC/ICT Forex Day Trading Bot.
     Pair: {pair}
@@ -235,6 +234,7 @@ def process_message(user_number, user_message):
                 send_whatsapp_text(user_number, analysis) 
             os.remove(chart_path) 
         else:
+            print("⚠️ Chart generation failed, sending text only.")
             send_whatsapp_text(user_number, analysis)
         
     except Exception as e:
