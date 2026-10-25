@@ -52,7 +52,7 @@ def send_whatsapp_image(to, image_path, caption):
             "type": "image",
             "image": {"id": media_id, "caption": caption}
         }
-        res = requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
+        requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
         return "SUCCESS"
     except Exception as e:
         return f"❌ Image Send Exception: {str(e)}"
@@ -91,8 +91,13 @@ def generate_chart(pair, ai_text, current_price):
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
         
-        mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', 
-                 hlines=hlines if hlines else None, savefig=dict(fname=chart_path, bbox_inches='tight'))
+        # YAHAN FIX KIYA HAI: Agar hlines khali hain to argument pass nahi karenge
+        plot_kwargs = dict(type='candle', style='charles', title=title, ylabel='Price', 
+                           savefig=dict(fname=chart_path, bbox_inches='tight'))
+        if hlines:
+            plot_kwargs['hlines'] = hlines
+
+        mpf.plot(df, **plot_kwargs)
         
         plt.close('all') 
         return chart_path
@@ -205,18 +210,14 @@ def process_message(user_number, user_message):
             
         analysis = get_ai_analysis(pair, live_data, current_price)
         
-        # Chart Check
         chart_path = generate_chart(pair, analysis, current_price)
         
         if chart_path.startswith("❌"):
-            # Agar chart banne mein error aya
             send_whatsapp_text(user_number, analysis)
             send_whatsapp_text(user_number, chart_path)
         else:
-            # Agar chart ban gaya, send karein
             status = send_whatsapp_image(user_number, chart_path, analysis)
             if status != "SUCCESS":
-                # Agar Meta ne image reject ki
                 send_whatsapp_text(user_number, analysis)
                 send_whatsapp_text(user_number, status)
             os.remove(chart_path) 
