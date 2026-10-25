@@ -3,10 +3,12 @@ import requests
 import os
 import threading
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg') # <--- YEH ZAROORI HAI RENDER PAR CRASH ROKNE KE LIYE
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 import re
-import datetime
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -18,27 +20,39 @@ PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+
+# AAPKE ORACLE SERVER KA IP
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 
 # ==========================================
-# WHATSAPP MEDIA UPLOAD & SEND
+# WHATSAPP MEDIA FUNCTIONS
 # ==========================================
+def send_whatsapp_text(to, text):
+    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
+    try:
+        requests.post(url, headers=headers, json=payload, timeout=10)
+    except Exception as e:
+        print("SEND TEXT ERROR:", e)
+
 def send_whatsapp_image(to, image_path, caption):
-    # 1. Upload Image to Meta
+    # 1. Meta par image upload karein
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/media"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
     files = {'file': open(image_path, 'rb')}
     data = {'messaging_product': 'whatsapp', 'type': 'image/png'}
     
     try:
-        upload_res = requests.post(url, headers=headers, files=files, data=data, timeout=15).json()
+        upload_res = requests.post(url, headers=headers, files=files, data=data, timeout=20).json()
         if 'id' not in upload_res:
-            print("Upload Error:", upload_res)
+            print("UPLOAD ERROR:", upload_res)
+            send_whatsapp_text(to, "Image upload failed. Here is the text:\n" + caption)
             return
         
         media_id = upload_res['id']
         
-        # 2. Send Image Message
+        # 2. Image ke sath message send karein
         msg_url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
         msg_headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
         payload = {
@@ -50,71 +64,58 @@ def send_whatsapp_image(to, image_path, caption):
         requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
         
     except Exception as e:
-        print("Image Send Error:", e)
-
-def send_whatsapp_text(to, text):
-    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
-    try:
-        requests.post(url, headers=headers, json=payload, timeout=10)
-    except Exception as e:
-        print("SEND ERROR:", e)
+        print("IMAGE SEND ERROR:", e)
+        send_whatsapp_text(to, caption)
 
 # ==========================================
 # CHART GENERATION
 # ==========================================
 def generate_chart(pair, ai_text):
-    # Get 5M data for chart
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
         
     url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=5min&outputsize=40&apikey={TWELVEDATA_API_KEY}"
-    res = requests.get(url).json()
-    
-    if 'values' not in res:
-        return None
-
-    # Prepare Data for mplfinance
-    df = pd.DataFrame(res['values'])
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    df.set_index('datetime', inplace=True)
-    df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
-    df = df.astype(float)
-    df = df.sort_index()
-
-    # Extract Entry, SL, TP from AI text using Regex
-    entry_val, sl_val, tp_val = None, None, None
-    
-    entry_match = re.search(r"Entry:\s*([\d\.]+)", ai_text, re.IGNORECASE)
-    sl_match = re.search(r"SL:\s*([\d\.]+)", ai_text, re.IGNORECASE)
-    tp_match = re.search(r"TP:\s*([\d\.]+)", ai_text, re.IGNORECASE)
-
-    if entry_match: entry_val = float(entry_match.group(1))
-    if sl_match: sl_val = float(sl_match.group(1))
-    if tp_match: tp_val = float(tp_match.group(1))
-
-    # Configure Chart
-    hlines = []
-    if entry_val: hlines.append(dict(hlines=entry_val, colors='b', linestyle='-', linewidths=1.5))
-    if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
-    if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
-
-    # Generate Chart
-    chart_path = f"/tmp/{symbol.replace('/', '')}_chart.png"
-    title = f"{symbol} - 5M Chart"
-    
     try:
+        res = requests.get(url, timeout=10).json()
+        if 'values' not in res:
+            return None
+
+        df = pd.DataFrame(res['values'])
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df.set_index('datetime', inplace=True)
+        df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
+        df = df.astype(float).sort_index()
+
+        # AI ke text se levels nikalna
+        entry_val = sl_val = tp_val = None
+        entry_match = re.search(r"Entry[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
+        sl_match = re.search(r"SL[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
+        tp_match = re.search(r"TP[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
+
+        if entry_match: entry_val = float(entry_match.group(1))
+        if sl_match: sl_val = float(sl_match.group(1))
+        if tp_match: tp_val = float(tp_match.group(1))
+
+        hlines = []
+        if entry_val: hlines.append(dict(hlines=entry_val, colors='b', linestyle='-', linewidths=1.5))
+        if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
+        if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
+
+        chart_path = f"/tmp/{symbol.replace('/', '')}_chart.png"
+        title = f"{symbol} - 5M Chart"
+        
         mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', 
                  hlines=hlines if hlines else None, savefig=chart_path)
+        
+        plt.close('all') # Memory clean karne ke liye
         return chart_path
     except Exception as e:
-        print("Chart Error:", e)
+        print("CHART ERROR:", e)
         return None
 
 # ==========================================
-# MAIN LOGIC
+# AI & DATA LOGIC
 # ==========================================
 def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
@@ -124,9 +125,15 @@ def get_ai_analysis(pair, live_data, current_price):
     Pair: {pair}
     Current Price: {current_price}
     Live Data:\n{live_data}\n
-    Output in Roman Urdu (Bias, Direction, 1H Structure, Entry Status, Entry, SL, TP, Alert Level).
+    Output in Roman Urdu:
+    * Bias: [Bullish/Bearish]
+    * Direction: [Buy/Sell/Wait]
+    * Status: [Entry / No Trade]
+    * Entry: [Price or N/A]
+    * SL: [Price or N/A]
+    * TP: [Price or N/A]
+    * Alert Level: [Price]
     """
-    
     payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=45).json()
@@ -159,6 +166,9 @@ def get_live_data(pair):
             return None, None
     return data_text, current_price
 
+# ==========================================
+# MESSAGE PROCESSOR
+# ==========================================
 def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper()
@@ -190,28 +200,26 @@ def process_message(user_number, user_message):
             else:
                 send_whatsapp_text(user_number, "Format: ALERT GOLD 4050")
                 return
-        # --- END ORACLE ALERT LOGIC ---
 
-        # Normal AI Analysis
+        # --- NORMAL AI ANALYSIS ---
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         if len(pair) < 4:
             send_whatsapp_text(user_number, "Bhai valid pair likhein.")
             return
+        
+        send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
         live_data, current_price = get_live_data(pair)
         if not live_data:
             send_whatsapp_text(user_number, f"❌ Data not available for {pair}")
             return
             
-        send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
-        
         analysis = get_ai_analysis(pair, live_data, current_price)
         
-        # Chart Generation & Sending
         chart_path = generate_chart(pair, analysis)
         if chart_path:
             send_whatsapp_image(user_number, chart_path, analysis)
-            os.remove(chart_path) # Delete after sending to save space
+            os.remove(chart_path) 
         else:
             send_whatsapp_text(user_number, analysis)
         
@@ -241,7 +249,6 @@ def webhook():
                             if msg['type'] == 'text':
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip()
-                                
                                 thread = threading.Thread(target=process_message, args=(user_number, user_message))
                                 thread.start()
         except Exception as e:
