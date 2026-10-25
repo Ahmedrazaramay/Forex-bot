@@ -6,13 +6,16 @@ import threading
 app = Flask(__name__)
 
 # ==========================================
-# 100% SECURE: KEYS SIRF RENDER VARIABLES SE
+# SECURE KEYS (Render Environment)
 # ==========================================
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+
+# Yahan aapke Oracle server ka IP dalein
+ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 
 def send_whatsapp_message(to, text):
     if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
@@ -25,13 +28,30 @@ def send_whatsapp_message(to, text):
     except Exception as e:
         print("SEND ERROR:", e)
 
+def get_ai_analysis(pair, live_data, current_price):
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+    
+    prompt = f"""
+    Pair: {pair}
+    Current Price: {current_price}
+    Live Data:\n{live_data}\n
+    Output in Roman Urdu (Bias, Direction, 1H Structure, Entry Status, Entry, SL, TP, Alert Level).
+    """
+    
+    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=45).json()
+        return res['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        return f"AI ERROR: {str(e)}"
+
 def get_live_data(pair):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
     
-    # UPDATED DATA SIZES: W(30), D(30), 1H(60), 5M(60)
-    timeframes = {"W": ("1week", 30), "D": ("1day", 30), "1H": ("1h", 60), "5M": ("5min", 60)}
+    timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 60), "5M": ("5min", 60)}
     data_text = ""
     current_price = 0
     
@@ -42,84 +62,61 @@ def get_live_data(pair):
             if 'values' in res:
                 if tf_code == "5min":
                     current_price = res['values'][0]['close']
-                
                 data_text += f"--- {tf_name} ---\n"
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None, f"❌ Bhai, {symbol} ka data free API par available nahi hai."
-        except Exception as e:
-            return None, f"❌ Network error aya hai. Thori der baad try karein."
+                return None, None
+        except:
+            return None, None
     return data_text, current_price
 
-def get_ai_analysis(pair, live_data, current_price):
-    url = "https://api.deepseek.com/chat/completions"
-    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-    
-    # AAPKE RULES (AI inko andar hi andar check karega)
-    master_prompt = """
-    You are a strict SMC/ICT Forex Day Trading Bot.
-    Analyze the following rules internally (DO NOT print these steps):
-    Setup: 1H POI -> 5M Entry | RR 1:3 ONLY.
-    1. Bias: Monthly/Weekly/Daily. (Conflict -> bada TF jeete).
-    2. 1H POI valid = OB with FVG.
-    3. 5M confirmation (all 4 required): 1H POI tap, 5M MSS, 5M Displacement, 5M Retest.
-    4. SL = 5M POI ± buffer. TP = 1H nearest liquidity.
-    5. RR: SIRF 1:3. Agar 1:3 nahi ban rahi to NO TRADE.
-    6. Pair Behavior: Volatility check. Agar Daily range < 50 pips to NO TRADE.
-    7. Agar koi bhi condition fail ho, to NO TRADE dena hai.
-    
-    IMPORTANT: Do NOT output Step 0, Step 1, etc. Just give the final decision.
-    Use this EXACT short format:
-
-    🪙 {pair}
-    📍 Current: {current_price}
-    📝 Report: [1 short line about market movement, e.g., 1H Liquidity Sweep hui ya POI tap hua]
-    [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
-    📊 1H: [Bullish/Bearish/Consolidation]
-    [✅ or 🚫] Status: [ENTRY / NO TRADE]
-    💡 Reason: [1 short SMC reason in Roman Urdu]
-    """
-    
-    full_prompt = f"""
-    {master_prompt}
-    (If Status is ENTRY, output Entry/SL/TP/RR. If NO TRADE, output Alert).
-    
-    Data:
-    Pair: {pair}
-    Current Price: {current_price}
-    Live Data:\n{live_data}
-    """
-    
-    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": full_prompt}], "temperature": 0.0}
-    
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=45).json()
-        if 'choices' not in res:
-            return f"DEEPSEEK ERROR: {str(res)}"
-        return res['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        return f"AI NETWORK ERROR: {str(e)}"
-
-# ==========================================
-# BACKGROUND PROCESS (Meta Timeout Fix)
-# ==========================================
 def process_message(user_number, user_message):
     try:
-        greetings = ["HI", "HELLO", "HELO", "SALAM", "AO", "START", "HEY"]
-        if user_message in greetings:
-            send_whatsapp_message(user_number, "🤖 *Forex SMC Bot Active!*\n\nMujhe kisi bhi pair ka naam bhejein (jaise GOLD, EURUSD).")
-            return
-            
-        pair = "XAU/USD" if "GOLD" in user_message or "XAU" in user_message else user_message
+        msg_upper = user_message.upper()
         
+        # --- ORACLE ALERT LOGIC START ---
+        # Agar user "ALERT GOLD 4050" ya "ALERT 4050" likhe
+        if "ALERT" in msg_upper:
+            parts = msg_upper.split()
+            price_level = None
+            pair = "XAU/USD" # Default
+            
+            for part in parts:
+                try:
+                    # Check if the part is a number (price)
+                    price_level = float(part)
+                except ValueError:
+                    # If not a number, maybe it's a pair name
+                    if len(part) >= 3 and part != "ALERT":
+                        pair = part
+            
+            if price_level:
+                # Send request to Oracle server
+                try:
+                    oracle_payload = {"symbol": pair, "price": price_level}
+                    response = requests.post(ORACLE_API_URL, json=oracle_payload, timeout=10)
+                    if response.status_code == 200:
+                        send_whatsapp_message(user_number, f"✅ Alert set on Oracle for {pair} at {price_level}!")
+                    else:
+                        send_whatsapp_message(user_number, f"❌ Oracle Error: {response.text}")
+                except Exception as e:
+                    send_whatsapp_message(user_number, f"❌ Oracle Connection Failed: {str(e)}")
+                return
+            else:
+                send_whatsapp_message(user_number, "Format: ALERT GOLD 4050")
+                return
+        # --- ORACLE ALERT LOGIC END ---
+
+        # Normal AI Analysis
+        pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         if len(pair) < 4:
             send_whatsapp_message(user_number, "Bhai valid pair likhein (jaise GOLD, EURUSD).")
             return
         
         live_data, current_price = get_live_data(pair)
         if not live_data:
-            send_whatsapp_message(user_number, current_price) # Error message
+            send_whatsapp_message(user_number, f"❌ Data not available for {pair}")
             return
             
         analysis = get_ai_analysis(pair, live_data, current_price)
@@ -150,12 +147,10 @@ def webhook():
                             msg = value['messages'][0]
                             if msg['type'] == 'text':
                                 user_number = msg['from']
-                                user_message = msg['text']['body'].strip().upper()
+                                user_message = msg['text']['body'].strip()
                                 
-                                # Start Background Thread
                                 thread = threading.Thread(target=process_message, args=(user_number, user_message))
                                 thread.start()
-                                
         except Exception as e:
             print("WEBHOOK CRASH:", e)
         return "OK", 200
