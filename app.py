@@ -43,8 +43,10 @@ def send_whatsapp_image(to, image_path, caption):
     
     try:
         upload_res = requests.post(url, headers=headers, files=files, data=data, timeout=20).json()
+        print("UPLOAD RESPONSE:", upload_res) # Logs ke liye
+        
         if 'id' not in upload_res:
-            print("UPLOAD ERROR:", upload_res)
+            print("❌ UPLOAD FAILED. Check logs.")
             return False
         
         media_id = upload_res['id']
@@ -56,7 +58,8 @@ def send_whatsapp_image(to, image_path, caption):
             "type": "image",
             "image": {"id": media_id, "caption": caption}
         }
-        requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
+        res = requests.post(msg_url, headers=msg_headers, json=payload, timeout=10)
+        print("IMAGE MSG RESPONSE:", res.text)
         return True
     except Exception as e:
         print("IMAGE SEND ERROR:", e)
@@ -79,12 +82,12 @@ def generate_chart(pair, ai_text, current_price):
 
         df = pd.DataFrame(res['values'])
         df['datetime'] = pd.to_datetime(df['datetime'])
-        df.set_index('datetime', inplace=True)
+        # Pandas warning fix
+        df = df.set_index('datetime')
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df = df.astype(float).sort_index()
 
         entry_val = sl_val = tp_val = None
-        # Improved regex to catch different AI formats
         entry_match = re.search(r"Entry[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         sl_match = re.search(r"SL[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         tp_match = re.search(r"TP[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
@@ -105,36 +108,44 @@ def generate_chart(pair, ai_text, current_price):
                  hlines=hlines if hlines else None, savefig=chart_path)
         
         plt.close('all') 
+        print("CHART GENERATED:", chart_path)
         return chart_path
     except Exception as e:
         print("CHART EXCEPTION:", e)
         return None
 
 # ==========================================
-# AI LOGIC (STRICT PROMPT)
+# AI LOGIC (STYLISH PROMPT)
 # ==========================================
 def get_ai_analysis(pair, live_data, current_price):
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     
-    # SAKHT PROMPT: AI ko lambi kahani likhne se roka gaya hai
+    # AAAPKA STYLISH PROMPT
     prompt = f"""
-    You are a strict SMC bot. 
+    You are a strict SMC/ICT Forex Day Trading Bot.
     Pair: {pair}
     Current Price: {current_price}
     Live Data:\n{live_data}\n
     
-    DO NOT write long paragraphs. DO NOT write "Roman Urdu Analysis". 
-    Just output exactly this short format in Roman Urdu:
+    Output EXACTLY in this format (No intro, No outro):
     
-    * Bias: [Bullish/Bearish]
-    * Direction: [Buy/Sell/Wait]
-    * Status: [ENTRY / NO TRADE]
-    * Entry: [Price or N/A]
-    * SL: [Price or N/A]
-    * TP: [Price or N/A]
-    * Alert Level: [Price]
-    * Reason: [1 short line only]
+    🪙 {pair}
+    📍 Current: {current_price}
+    📝 Report: [1 short line about market movement]
+    [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
+    📊 1H: [Bullish/Bearish/Consolidation]
+    [✅ or 🚫] Status: [ENTRY / NO TRADE]
+    💡 Reason: [1 short SMC reason in Roman Urdu]
+    
+    (If Status is ENTRY):
+    🎯 Entry: [Price]
+    🛑 SL: [Price]
+    💰 TP: [Price]
+    ⚖️ RR: 1:3
+    
+    (If Status is NO TRADE):
+    🎯 Alert Level: [Price]
     """
     payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0}
     try:
@@ -220,7 +231,8 @@ def process_message(user_number, user_message):
         if chart_path:
             success = send_whatsapp_image(user_number, chart_path, analysis)
             if not success:
-                send_whatsapp_text(user_number, analysis) # Fallback to text
+                print("⚠️ Image send failed, sending text only.")
+                send_whatsapp_text(user_number, analysis) 
             os.remove(chart_path) 
         else:
             send_whatsapp_text(user_number, analysis)
