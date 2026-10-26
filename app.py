@@ -23,6 +23,7 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
+MY_WHATSAPP_NUMBER = "923003212360" # Aapka number taake Oracle trigger par yahan analysis aaye
 
 # ==========================================
 # DUPLICATE FILTER STORAGE
@@ -116,7 +117,6 @@ def generate_chart(pair, ai_text, current_price):
         if entry_val: hlines.append(dict(hlines=entry_val, colors='b', linestyle='-', linewidths=1.5))
         if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
         if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
-        # YELLOW LINE FOR ALERT LEVEL (Point 4)
         if alert_val: hlines.append(dict(hlines=alert_val, colors='y', linestyle='-', linewidths=2.0))
 
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
@@ -271,7 +271,7 @@ def process_message(user_number, user_message):
         send_whatsapp_text(user_number, f"SYSTEM ERROR: {str(e)}")
 
 # ==========================================
-# ROUTES (WEBHOOK & PING)
+# ROUTES (WEBHOOK, PING & TRIGGER)
 # ==========================================
 @app.route('/ping', methods=['GET'])
 def ping():
@@ -280,6 +280,18 @@ def ping():
 @app.route('/', methods=['GET'])
 def home():
     return "Alive", 200
+
+# NAYA RASTA (Point 5 - Trigger)
+@app.route('/trigger_analysis', methods=['POST'])
+def trigger_analysis():
+    data = request.json
+    symbol = data.get('symbol', 'XAU/USD')
+    
+    # Background mein analysis shuru karein
+    thread = threading.Thread(target=process_message, args=(MY_WHATSAPP_NUMBER, symbol))
+    thread.start()
+    
+    return jsonify({"status": "success", "message": "Analysis started"}), 200
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
