@@ -23,7 +23,7 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
-MY_WHATSAPP_NUMBER = "923003212360" # Aapka number taake Oracle trigger par yahan analysis aaye
+MY_WHATSAPP_NUMBER = "923003212360" 
 
 # ==========================================
 # DUPLICATE FILTER STORAGE
@@ -43,6 +43,12 @@ def is_duplicate(msg_id):
         
     _processed_messages[msg_id] = now
     return False
+
+# ==========================================
+# CACHE STORAGE (Point 11 Optimization)
+# ==========================================
+data_cache = {}
+CACHE_EXPIRY = 300 # 5 minutes
 
 # ==========================================
 # WHATSAPP FUNCTIONS
@@ -171,9 +177,19 @@ def get_ai_analysis(pair, live_data, current_price):
         return f"AI ERROR: {str(e)}"
 
 def get_live_data(pair):
+    global data_cache
+    
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
+
+    # CACHE CHECK: Agar data 5 minute se purana nahi hai, to API call mat karo
+    now = time.time()
+    if symbol in data_cache:
+        cached_time, cached_data, cached_price = data_cache[symbol]
+        if now - cached_time < CACHE_EXPIRY:
+            print(f"Using Cached Data for {symbol}")
+            return cached_data, cached_price
     
     timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 60), "5M": ("5min", 60)}
     data_text = ""
@@ -194,6 +210,9 @@ def get_live_data(pair):
                 return f"API_ERROR: {err_msg}", None
         except Exception as e:
             return f"API_ERROR: {str(e)}", None
+            
+    # Save to cache
+    data_cache[symbol] = (now, data_text, current_price)
     return data_text, current_price
 
 # ==========================================
@@ -281,13 +300,11 @@ def ping():
 def home():
     return "Alive", 200
 
-# NAYA RASTA (Point 5 - Trigger)
 @app.route('/trigger_analysis', methods=['POST'])
 def trigger_analysis():
     data = request.json
     symbol = data.get('symbol', 'XAU/USD')
     
-    # Background mein analysis shuru karein
     thread = threading.Thread(target=process_message, args=(MY_WHATSAPP_NUMBER, symbol))
     thread.start()
     
