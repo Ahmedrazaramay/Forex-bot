@@ -100,19 +100,24 @@ def generate_chart(pair, ai_text, current_price):
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df = df.astype(float).sort_index()
 
-        entry_val = sl_val = tp_val = None
+        entry_val = sl_val = tp_val = alert_val = None
+        
         entry_match = re.search(r"Entry[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         sl_match = re.search(r"SL[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         tp_match = re.search(r"TP[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
+        alert_match = re.search(r"Alert Level[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
 
         if entry_match: entry_val = float(entry_match.group(1))
         if sl_match: sl_val = float(sl_match.group(1))
         if tp_match: tp_val = float(tp_match.group(1))
+        if alert_match: alert_val = float(alert_match.group(1))
 
         hlines = []
         if entry_val: hlines.append(dict(hlines=entry_val, colors='b', linestyle='-', linewidths=1.5))
         if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
         if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
+        # YELLOW LINE FOR ALERT LEVEL (Point 4)
+        if alert_val: hlines.append(dict(hlines=alert_val, colors='y', linestyle='-', linewidths=2.0))
 
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
@@ -185,7 +190,6 @@ def get_live_data(pair):
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                # YAHAN ERROR CHECK ADD KIYA HAI
                 err_msg = res.get('message', str(res))
                 return f"API_ERROR: {err_msg}", None
         except Exception as e:
@@ -199,7 +203,6 @@ def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper().strip()
         
-        # Alert Logic
         if "ALERT" in msg_upper:
             parts = msg_upper.split()
             price_level = None
@@ -217,7 +220,7 @@ def process_message(user_number, user_message):
                     oracle_payload = {"symbol": pair, "price": price_level}
                     response = requests.post(ORACLE_API_URL, json=oracle_payload, timeout=10)
                     if response.status_code == 200:
-                        send_whatsapp_text(user_number, f"✅ Alert set on Oracle for {pair} at {price_level}!")
+                        send_whatsapp_text(user_number, f"✅ Alert sent to Oracle for {pair} at {price_level}!")
                     else:
                         send_whatsapp_text(user_number, f"❌ Oracle Error.")
                 except Exception as e:
@@ -227,13 +230,11 @@ def process_message(user_number, user_message):
                 send_whatsapp_text(user_number, "Format: ALERT GOLD 4050")
                 return
 
-        # Friendly Greeting Filter
         greetings = ["HELLO", "HI", "HEY", "SALAM", "ASSALAM", "AO", "START", "BOSS"]
         if msg_upper in greetings:
             send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main analysis shuru karoon. 😎")
             return
 
-        # Basic Pair Validation
         valid_keywords = ["XAU", "GOLD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
         if not any(keyword in msg_upper for keyword in valid_keywords):
             send_whatsapp_text(user_number, "Bhai, yeh kya likh diya? 😅\nMain sirf currency pairs samajhta hoon. Koi valid pair likhein (e.g., EURUSD, XAUUSD, GOLD).")
@@ -245,7 +246,6 @@ def process_message(user_number, user_message):
         
         live_data, current_price = get_live_data(pair)
         
-        # YAHAN ERROR MESSAGE CHECK KIYA HAI
         if not live_data:
             send_whatsapp_text(user_number, f"❌ Data not available for {pair}")
             return
