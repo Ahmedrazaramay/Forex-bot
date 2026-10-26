@@ -8,6 +8,7 @@ matplotlib.use('Agg')
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 import re
+import time
 from datetime import datetime
 
 app = Flask(__name__)
@@ -23,6 +24,29 @@ TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 
+# ==========================================
+# DUPLICATE FILTER STORAGE
+# ==========================================
+_processed_messages = {}
+
+def is_duplicate(msg_id):
+    if not msg_id:
+        return False
+    now = time.time()
+    # Purge old messages (older than 5 minutes)
+    for k in list(_processed_messages.keys()):
+        if now - _processed_messages[k] > 300:
+            del _processed_messages[k]
+            
+    if msg_id in _processed_messages:
+        return True
+        
+    _processed_messages[msg_id] = now
+    return False
+
+# ==========================================
+# WHATSAPP FUNCTIONS
+# ==========================================
 def send_whatsapp_text(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
@@ -57,6 +81,9 @@ def send_whatsapp_image(to, image_path, caption):
     except Exception as e:
         return f"❌ Image Send Exception: {str(e)}"
 
+# ==========================================
+# CHART & AI FUNCTIONS
+# ==========================================
 def generate_chart(pair, ai_text, current_price):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
@@ -91,7 +118,6 @@ def generate_chart(pair, ai_text, current_price):
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
         
-        # YAHAN FIX KIYA HAI: Agar hlines khali hain to argument pass nahi karenge
         plot_kwargs = dict(type='candle', style='charles', title=title, ylabel='Price', 
                            savefig=dict(fname=chart_path, bbox_inches='tight'))
         if hlines:
@@ -165,10 +191,14 @@ def get_live_data(pair):
             return None, None
     return data_text, current_price
 
+# ==========================================
+# MAIN PROCESS LOGIC
+# ==========================================
 def process_message(user_number, user_message):
     try:
-        msg_upper = user_message.upper()
+        msg_upper = user_message.upper().strip()
         
+        # Alert Logic
         if "ALERT" in msg_upper:
             parts = msg_upper.split()
             price_level = None
@@ -196,10 +226,19 @@ def process_message(user_number, user_message):
                 send_whatsapp_text(user_number, "Format: ALERT GOLD 4050")
                 return
 
-        pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
-        if len(pair) < 4:
-            send_whatsapp_text(user_number, "Bhai valid pair likhein.")
+        # Friendly Greeting Filter
+        greetings = ["HELLO", "HI", "HEY", "SALAM", "ASSALAM", "AO", "START", "BOSS"]
+        if msg_upper in greetings:
+            send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main analysis shuru karoon. 😎")
             return
+
+        # Basic Pair Validation (Fixes the "Hello" bug for random words)
+        valid_keywords = ["XAU", "GOLD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
+        if not any(keyword in msg_upper for keyword in valid_keywords):
+            send_whatsapp_text(user_number, "Bhai, yeh kya likh diya? 😅\nMain sirf currency pairs samajhta hoon. Koi valid pair likhein (e.g., EURUSD, XAUUSD, GOLD).")
+            return
+
+        pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         
         send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
@@ -225,6 +264,13 @@ def process_message(user_number, user_message):
     except Exception as e:
         send_whatsapp_text(user_number, f"SYSTEM ERROR: {str(e)}")
 
+# ==========================================
+# ROUTES (WEBHOOK & PING)
+# ==========================================
+@app.route('/ping', methods=['GET'])
+def ping():
+    return "Alive", 200
+
 @app.route('/', methods=['GET'])
 def home():
     return "Alive", 200
@@ -245,6 +291,12 @@ def webhook():
                         value = change.get('value', {})
                         if 'messages' in value:
                             msg = value['messages'][0]
+                            msg_id = msg.get('id')
+                            
+                            # Duplicate Check
+                            if is_duplicate(msg_id):
+                                continue # Ignore duplicate message
+                                
                             if msg['type'] == 'text':
                                 user_number = msg['from']
                                 user_message = msg['text']['body'].strip()
