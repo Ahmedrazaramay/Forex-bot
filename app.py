@@ -33,7 +33,6 @@ def is_duplicate(msg_id):
     if not msg_id:
         return False
     now = time.time()
-    # Purge old messages (older than 5 minutes)
     for k in list(_processed_messages.keys()):
         if now - _processed_messages[k] > 300:
             del _processed_messages[k]
@@ -186,9 +185,11 @@ def get_live_data(pair):
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None, None
-        except:
-            return None, None
+                # YAHAN ERROR CHECK ADD KIYA HAI
+                err_msg = res.get('message', str(res))
+                return f"API_ERROR: {err_msg}", None
+        except Exception as e:
+            return f"API_ERROR: {str(e)}", None
     return data_text, current_price
 
 # ==========================================
@@ -232,7 +233,7 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main analysis shuru karoon. 😎")
             return
 
-        # Basic Pair Validation (Fixes the "Hello" bug for random words)
+        # Basic Pair Validation
         valid_keywords = ["XAU", "GOLD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
         if not any(keyword in msg_upper for keyword in valid_keywords):
             send_whatsapp_text(user_number, "Bhai, yeh kya likh diya? 😅\nMain sirf currency pairs samajhta hoon. Koi valid pair likhein (e.g., EURUSD, XAUUSD, GOLD).")
@@ -243,8 +244,13 @@ def process_message(user_number, user_message):
         send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
         live_data, current_price = get_live_data(pair)
+        
+        # YAHAN ERROR MESSAGE CHECK KIYA HAI
         if not live_data:
             send_whatsapp_text(user_number, f"❌ Data not available for {pair}")
+            return
+        elif live_data.startswith("API_ERROR:"):
+            send_whatsapp_text(user_number, f"❌ TwelveData Error:\n{live_data}")
             return
             
         analysis = get_ai_analysis(pair, live_data, current_price)
@@ -293,9 +299,8 @@ def webhook():
                             msg = value['messages'][0]
                             msg_id = msg.get('id')
                             
-                            # Duplicate Check
                             if is_duplicate(msg_id):
-                                continue # Ignore duplicate message
+                                continue 
                                 
                             if msg['type'] == 'text':
                                 user_number = msg['from']
