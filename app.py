@@ -27,7 +27,7 @@ TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 MY_WHATSAPP_NUMBER = "923003212360" 
 
-# GitHub Repo Info (Aapke screenshot se)
+# GitHub Repo Info
 GITHUB_USER = "Ahmedrazaramay"
 GITHUB_REPO = "Forex-bot"
 
@@ -37,7 +37,7 @@ GITHUB_REPO = "Forex-bot"
 _processed_messages = {}
 data_cache = {}
 CACHE_EXPIRY = 300
-course_cache = {} # To store course rules and save GitHub API calls
+course_cache = {}
 
 def is_duplicate(msg_id):
     if not msg_id: return False
@@ -52,15 +52,12 @@ def is_duplicate(msg_id):
 # GITHUB RAG FUNCTIONS
 # ==========================================
 def fetch_course_rules():
-    """Fetch all 10 text files from GitHub and cache them."""
     global course_cache
-    if course_cache:
-        return course_cache
+    if course_cache: return course_cache
 
     print("Fetching Course Transcripts from GitHub...")
     rules = {"macro": "", "structure": "", "entry": ""}
     
-    # Fetch File 1 & 2 for Macro Bias
     for i in [1, 2]:
         url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/course_video_{i}.txt"
         try:
@@ -68,14 +65,12 @@ def fetch_course_rules():
             if res.status_code == 200: rules["macro"] += res.text + "\n\n"
         except: pass
 
-    # Fetch File 3 for 1H Structure
     url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/course_video_3.txt"
     try:
         res = requests.get(url, timeout=10)
         if res.status_code == 200: rules["structure"] += res.text + "\n\n"
     except: pass
 
-    # Fetch File 4-10 for Entry (1H & 5M)
     for i in range(4, 11):
         url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/course_video_{i}.txt"
         try:
@@ -84,7 +79,6 @@ def fetch_course_rules():
         except: pass
 
     course_cache = rules
-    print("Course Transcripts Loaded Successfully!")
     return course_cache
 
 # ==========================================
@@ -124,7 +118,8 @@ def generate_chart(pair, timeframe, output_size=40):
     url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={timeframe}&outputsize={output_size}&apikey={TWELVEDATA_API_KEY}"
     try:
         res = requests.get(url, timeout=10).json()
-        if 'values' not in res: return f"❌ Chart Data Error: {res}"
+        if 'values' not in res: 
+            return f"❌ Chart Data Error: {res}"
 
         df = pd.DataFrame(res['values'])
         df['datetime'] = pd.to_datetime(df['datetime'])
@@ -138,7 +133,8 @@ def generate_chart(pair, timeframe, output_size=40):
         mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', savefig=dict(fname=chart_path, bbox_inches='tight'))
         plt.close('all') 
         return chart_path
-    except Exception as e: return f"❌ Chart Exception: {str(e)}"
+    except Exception as e: 
+        return f"❌ Chart Exception: {str(e)}"
 
 def generate_final_chart(pair, ai_data, current_price):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
@@ -147,6 +143,11 @@ def generate_final_chart(pair, ai_data, current_price):
     url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=5min&outputsize=40&apikey={TWELVEDATA_API_KEY}"
     try:
         res = requests.get(url, timeout=10).json()
+        
+        # FIX: Yahan check lagaya hai taake 'values' error na aaye
+        if 'values' not in res:
+            return f"❌ Final Chart Data Error (API Limit?): {res}"
+            
         df = pd.DataFrame(res['values'])
         df['datetime'] = pd.to_datetime(df['datetime'])
         df = df.set_index('datetime')
@@ -189,7 +190,8 @@ def generate_final_chart(pair, ai_data, current_price):
         fig.savefig(chart_path, bbox_inches='tight')
         plt.close(fig) 
         return chart_path
-    except Exception as e: return f"❌ Chart Exception: {str(e)}"
+    except Exception as e: 
+        return f"❌ Chart Exception: {str(e)}"
 
 # ==========================================
 # AI ANALYSIS FUNCTION
@@ -210,16 +212,13 @@ def get_available_gemini_models():
     return valid_models
 
 def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
-    # 1. Load Course Rules from GitHub
     rules = fetch_course_rules()
     
-    # 2. Encode Images
     with open(weekly, "rb") as f: encoded_weekly = base64.b64encode(f.read()).decode('utf-8')
     with open(daily, "rb") as f: encoded_daily = base64.b64encode(f.read()).decode('utf-8')
     with open(h1, "rb") as f: encoded_h1 = base64.b64encode(f.read()).decode('utf-8')
     with open(m5, "rb") as f: encoded_m5 = base64.b64encode(f.read()).decode('utf-8')
 
-    # 3. Construct the Dynamic RAG Prompt
     prompt = f"""
     You are an expert SMC/ICT Forex Trader. Analyze the provided charts for {pair} (Current Price: {current_price}).
     
@@ -283,7 +282,7 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
 
         for attempt in range(2):
             try:
-                res = requests.post(url, headers=headers, json=payload, timeout=90).json() # Increased timeout for large text
+                res = requests.post(url, headers=headers, json=payload, timeout=90).json() 
                 if 'error' in res and res['error'].get('code') == 503:
                     time.sleep(1); break 
                 if 'candidates' in res:
@@ -360,7 +359,9 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, "Bhai, valid pair likhein (e.g., EURUSD, XAUUSD, BTCUSD)."); return
 
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
-        send_whatsapp_text(user_number, "⏳ 4 Charts generate ho rahe hain aur AI aapke course ke rules (RAG) ke sath analysis kar raha hai. Please wait...")
+        
+        # MESSAGE FIXED HERE
+        send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
         live_data, current_price = get_live_data(pair)
         if not live_data or live_data.startswith("API_ERROR:"):
