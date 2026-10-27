@@ -28,9 +28,11 @@ ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 MY_WHATSAPP_NUMBER = "923003212360" 
 
 # ==========================================
-# DUPLICATE FILTER STORAGE
+# DUPLICATE FILTER & CACHE STORAGE
 # ==========================================
 _processed_messages = {}
+data_cache = {}
+CACHE_EXPIRY = 300
 
 def is_duplicate(msg_id):
     if not msg_id:
@@ -45,12 +47,6 @@ def is_duplicate(msg_id):
         
     _processed_messages[msg_id] = now
     return False
-
-# ==========================================
-# CACHE STORAGE
-# ==========================================
-data_cache = {}
-CACHE_EXPIRY = 300
 
 # ==========================================
 # WHATSAPP FUNCTIONS
@@ -90,7 +86,7 @@ def send_whatsapp_image(to, image_path, caption=""):
         return f"❌ Image Send Exception: {str(e)}"
 
 # ==========================================
-# CHART & AI FUNCTIONS
+# CHART FUNCTIONS
 # ==========================================
 def generate_basic_chart(pair):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
@@ -136,7 +132,6 @@ def generate_final_chart(pair, ai_data, current_price):
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df = df.astype(float).sort_index()
 
-        # Parse data from JSON safely
         entry_val = float(ai_data['entry']) if ai_data.get('entry') else None
         sl_val = float(ai_data['sl']) if ai_data.get('sl') else None
         tp_val = float(ai_data['tp']) if ai_data.get('tp') else None
@@ -177,6 +172,35 @@ def generate_final_chart(pair, ai_data, current_price):
     except Exception as e:
         return f"❌ Chart Exception: {str(e)}"
 
+# ==========================================
+# AI ANALYSIS FUNCTION (SMART FALLBACK)
+# ==========================================
+def get_available_gemini_models():
+    """Google se models ki list mangwata hai aur latest se purane ki taraf sort karta hai."""
+    valid_models = []
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+        res = requests.get(url, timeout=10).json()
+        
+        if 'models' in res:
+            for m in res['models']:
+                if 'generateContent' in m.get('supportedGenerationMethods', []):
+                    name = m['name'].replace('models/', '')
+                    if 'flash' in name or 'pro' in name:
+                        valid_models.append(name)
+            
+            # Sort descending (3.8 > 3.6 > 3.5)
+            valid_models.sort(reverse=True)
+    except Exception as e:
+        print("Model discovery failed:", e)
+    
+    # Agar list khali aaye (network issue), toh yeh default list use hogi
+    if not valid_models:
+        valid_models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+    
+    print(f"✅ Models to try: {valid_models}")
+    return valid_models
+
 def get_gemini_analysis(image_path, current_price, pair):
     with open(image_path, "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
@@ -201,8 +225,10 @@ def get_gemini_analysis(image_path, current_price, pair):
     }}
     """
 
-    models_to_try = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+    # Models ki list nikalta hai (latest se oldest)
+    models_to_try = get_available_gemini_models()
     
+    # Ek ek karke model try karega
     for model_name in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         headers = {'Content-Type': 'application/json'}
@@ -215,29 +241,32 @@ def get_gemini_analysis(image_path, current_price, pair):
             }],
             "generationConfig": {
                 "temperature": 0.0,
-                "response_mime_type": "application/json" # Forces Gemini to output JSON
+                "response_mime_type": "application/json"
             }
         }
 
-        for attempt in range(3):
+        for attempt in range(2): # Har model par 2 koshish (agar busy ho)
             try:
                 res = requests.post(url, headers=headers, json=payload, timeout=60).json()
                 
+                # Agar model busy hai (503), toh foran next model par jao
                 if 'error' in res and res['error'].get('code') == 503:
-                    time.sleep(2)
-                    continue
+                    print(f"{model_name} is busy. Switching to next model...")
+                    time.sleep(1)
+                    break 
                 
+                # Agar jawab mil gaya
                 if 'candidates' in res:
                     text = res['candidates'][0]['content']['parts'][0]['text'].strip()
-                    # Clean up if Gemini adds markdown backticks
                     text = text.replace('```json', '').replace('```', '').strip()
+                    print(f"✅ Successfully analyzed using: {model_name}")
                     return json.loads(text)
                 
-                break
+                break # Aur koi error hua toh next model par jao
                 
             except Exception as e:
                 print(f"Error with {model_name}: {str(e)}")
-                time.sleep(2)
+                time.sleep(1)
     
     return None
 
@@ -341,7 +370,6 @@ def process_message(user_number, user_message):
             
         final_chart_path = generate_final_chart(pair, ai_data, current_price)
         
-        # Format the message beautifully in Python
         message = f"🪙 {pair}\n"
         message += f"📍 Current: {current_price}\n"
         message += f"📝 Report: {ai_data.get('report', 'N/A')}\n"
