@@ -119,7 +119,7 @@ def generate_chart(pair, ai_text, current_price):
         if tp_match: tp_val = float(tp_match.group(1))
         if alert_match: alert_val = float(alert_match.group(1))
 
-        # FIX: Using separate lists for values, colors, and styles (mplfinance standard)
+        # FIX: mplfinance hlines ko dictionary format mein accept karta hai
         hline_vals = []
         hline_colors = []
         hline_styles = []
@@ -147,11 +147,14 @@ def generate_chart(pair, ai_text, current_price):
         plot_kwargs = dict(type='candle', style='charles', title=title, ylabel='Price', 
                            savefig=dict(fname=chart_path, bbox_inches='tight'))
         
-        # Agar lines majood hain to unko add karo
+        # Agar lines majood hain to unko dict ke through bhejo
         if hline_vals:
-            plot_kwargs['hlines'] = hline_vals
-            plot_kwargs['hlines_colors'] = hline_colors
-            plot_kwargs['hlines_linestyles'] = hline_styles
+            plot_kwargs['hlines'] = dict(
+                hlines=hline_vals,
+                colors=hline_colors,
+                linestyle=hline_styles,
+                linewidths=1.5
+            )
 
         mpf.plot(df, **plot_kwargs)
         
