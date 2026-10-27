@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import requests
 import os
 import threading
@@ -45,7 +45,7 @@ def is_duplicate(msg_id):
     return False
 
 # ==========================================
-# CACHE STORAGE (Point 11 Optimization)
+# CACHE STORAGE
 # ==========================================
 data_cache = {}
 CACHE_EXPIRY = 300 # 5 minutes
@@ -119,19 +119,39 @@ def generate_chart(pair, ai_text, current_price):
         if tp_match: tp_val = float(tp_match.group(1))
         if alert_match: alert_val = float(alert_match.group(1))
 
-        hlines = []
-        if entry_val: hlines.append(dict(hlines=entry_val, colors='b', linestyle='-', linewidths=1.5))
-        if sl_val: hlines.append(dict(hlines=sl_val, colors='r', linestyle='--', linewidths=1.5))
-        if tp_val: hlines.append(dict(hlines=tp_val, colors='g', linestyle='--', linewidths=1.5))
-        if alert_val: hlines.append(dict(hlines=alert_val, colors='y', linestyle='-', linewidths=2.0))
+        # FIX: Using separate lists for values, colors, and styles (mplfinance standard)
+        hline_vals = []
+        hline_colors = []
+        hline_styles = []
+
+        if entry_val: 
+            hline_vals.append(entry_val)
+            hline_colors.append('b')
+            hline_styles.append('-')
+        if sl_val: 
+            hline_vals.append(sl_val)
+            hline_colors.append('r')
+            hline_styles.append('--')
+        if tp_val: 
+            hline_vals.append(tp_val)
+            hline_colors.append('g')
+            hline_styles.append('--')
+        if alert_val: 
+            hline_vals.append(alert_val)
+            hline_colors.append('y')
+            hline_styles.append('-')
 
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
         
         plot_kwargs = dict(type='candle', style='charles', title=title, ylabel='Price', 
                            savefig=dict(fname=chart_path, bbox_inches='tight'))
-        if hlines:
-            plot_kwargs['hlines'] = hlines
+        
+        # Agar lines majood hain to unko add karo
+        if hline_vals:
+            plot_kwargs['hlines'] = hline_vals
+            plot_kwargs['hlines_colors'] = hline_colors
+            plot_kwargs['hlines_linestyles'] = hline_styles
 
         mpf.plot(df, **plot_kwargs)
         
@@ -183,7 +203,6 @@ def get_live_data(pair):
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
 
-    # CACHE CHECK: Agar data 5 minute se purana nahi hai, to API call mat karo
     now = time.time()
     if symbol in data_cache:
         cached_time, cached_data, cached_price = data_cache[symbol]
@@ -211,7 +230,6 @@ def get_live_data(pair):
         except Exception as e:
             return f"API_ERROR: {str(e)}", None
             
-    # Save to cache
     data_cache[symbol] = (now, data_text, current_price)
     return data_text, current_price
 
