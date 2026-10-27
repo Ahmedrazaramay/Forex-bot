@@ -212,6 +212,9 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
     Follow strict Top-Down SMC Analysis.
     Additional Data: \n{live_data}\n
 
+    IMPORTANT: If Status is ENTRY, you MUST calculate TP based on EXACTLY 1:3 Risk Reward.
+    Example: If Entry is 100, SL is 90 (Risk 10), TP MUST be 130.
+    
     You MUST respond with a valid JSON object ONLY. Do not include markdown formatting or backticks.
     The JSON must have exactly these keys:
     {{
@@ -256,7 +259,6 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
                 res = requests.post(url, headers=headers, json=payload, timeout=60).json()
                 
                 if 'error' in res and res['error'].get('code') == 503:
-                    print(f"{model_name} busy. Switching...")
                     time.sleep(1)
                     break 
                 
@@ -311,29 +313,34 @@ def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper().strip()
         
+        # FIXED ALERT PARSING
         if "ALERT" in msg_upper:
-            parts = msg_upper.split()
-            price_level = None
+            # Extract all prices using regex
+            prices = re.findall(r'\b\d+(?:\.\d+)?\b', user_message)
+            
+            # Extract pair name (ignore common words)
+            words = msg_upper.replace("ALERT", "").replace("AND", "").replace("SET", "").split()
             pair = "XAU/USD"
-            
-            for part in parts:
-                try: price_level = float(part)
-                except ValueError:
-                    if len(part) >= 3 and part != "ALERT": pair = part
-            
-            if price_level:
-                try:
-                    oracle_payload = {"symbol": pair, "price": price_level}
-                    response = requests.post(ORACLE_API_URL, json=oracle_payload, timeout=10)
-                    if response.status_code == 200:
-                        send_whatsapp_text(user_number, f"✅ Alert sent to Oracle for {pair} at {price_level}!")
-                    else:
-                        send_whatsapp_text(user_number, f"❌ Oracle Error.")
-                except Exception as e:
-                    send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
+            for w in words:
+                if len(w) >= 3 and not w.replace('.', '', 1).isdigit():
+                    pair = w
+                    break
+
+            if prices:
+                for price_str in prices:
+                    price_level = float(price_str)
+                    try:
+                        oracle_payload = {"symbol": pair, "price": price_level}
+                        response = requests.post(ORACLE_API_URL, json=oracle_payload, timeout=10)
+                        if response.status_code == 200:
+                            send_whatsapp_text(user_number, f"✅ Alert sent to Oracle for {pair} at {price_level}!")
+                        else:
+                            send_whatsapp_text(user_number, f"❌ Oracle Error for {price_level}.")
+                    except Exception as e:
+                        send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
                 return
             else:
-                send_whatsapp_text(user_number, "Format: ALERT GOLD 4050")
+                send_whatsapp_text(user_number, "Format: ALERT GOLD 4050 and 4080")
                 return
 
         greetings = ["HELLO", "HI", "HEY", "SALAM", "ASSALAM", "AO", "START", "BOSS"]
@@ -341,7 +348,7 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main 4-Chart Top-Down analysis shuru karoon. 😎")
             return
 
-        valid_keywords = ["XAU", "GOLD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
+        valid_keywords = ["XAU", "GOLD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "BTC"]
         if not any(keyword in msg_upper for keyword in valid_keywords):
             send_whatsapp_text(user_number, "Bhai, yeh kya likh diya? 😅\nMain sirf currency pairs samajhta hoon. Koi valid pair likhein (e.g., EURUSD, XAUUSD, GOLD).")
             return
@@ -359,7 +366,6 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, f"❌ TwelveData Error:\n{live_data}")
             return
             
-        # Delay to avoid TwelveData rate limit (8 calls/min)
         chart_w = generate_chart(pair, "1week", 30)
         time.sleep(1)
         chart_d = generate_chart(pair, "1day", 40)
@@ -382,6 +388,26 @@ def process_message(user_number, user_message):
         if not ai_data:
             send_whatsapp_text(user_number, "❌ AI ne jawab nahi diya ya saare models busy hain. Thori dair baad try karein.")
             return
+
+        # STRICT RR VALIDATION IN PYTHON
+        if ai_data.get('status') == 'ENTRY':
+            try:
+                e_val = float(ai_data['entry'])
+                s_val = float(ai_data['sl'])
+                t_val = float(ai_data['tp'])
+                
+                risk = abs(e_val - s_val)
+                reward = abs(t_val - e_val)
+                
+                if risk > 0:
+                    actual_rr = reward / risk
+                    # Tolerance of 0.1 (between 2.9 and 3.1)
+                    if actual_rr < 2.9 or actual_rr > 3.1:
+                        ai_data['status'] = 'NO TRADE'
+                        ai_data['reason'] = f"RR ghalat tha ({actual_rr:.1f}R). Sirf 1:3 allowed hai."
+                        ai_data['alert_level'] = ai_data['entry']
+            except:
+                pass # Agar AI ne text bheja instead of number
             
         final_chart_path = generate_final_chart(pair, ai_data, current_price)
         
