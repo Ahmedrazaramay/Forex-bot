@@ -25,9 +25,9 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
+ORACLE_CLEAR_URL = "http://141.145.158.62:5000/clear_alerts"
 MY_WHATSAPP_NUMBER = "923003212360" 
 
-# GitHub Repo Info
 GITHUB_USER = "Ahmedrazaramay"
 GITHUB_REPO = "Forex-bot"
 
@@ -109,7 +109,7 @@ def send_whatsapp_image(to, image_path, caption=""):
     except Exception as e: return f"❌ Image Send Exception: {str(e)}"
 
 # ==========================================
-# DATA FETCHING (Optimized to 4 API calls total)
+# DATA FETCHING
 # ==========================================
 def fetch_market_data(pair):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
@@ -120,7 +120,6 @@ def fetch_market_data(pair):
     live_text = ""
     current_price = 0
     
-    # We need to respect the 8 calls/min limit. 4 calls are safe.
     for tf_name, tf_code in timeframes.items():
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=50&apikey={TWELVEDATA_API_KEY}"
         try:
@@ -136,7 +135,7 @@ def fetch_market_data(pair):
                 if tf_code == "5min": current_price = df['Close'].iloc[-1]
                 
                 live_text += f"--- {tf_name} ---\n"
-                for c in res['values'][:20]: # Only last 20 candles for text to save tokens
+                for c in res['values'][:20]:
                     live_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
                 return None, None, f"API_ERROR: {res.get('message', str(res))}"
@@ -146,7 +145,7 @@ def fetch_market_data(pair):
     return data_dict, current_price, live_text
 
 # ==========================================
-# CHART FUNCTIONS (Using saved data, 0 API calls)
+# CHART FUNCTIONS
 # ==========================================
 def create_chart_from_df(df, symbol, timeframe):
     chart_path = f"/tmp/{symbol.replace('/', '')}_{timeframe}.jpg"
@@ -302,6 +301,18 @@ def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper().strip()
         
+        # NEW: Clear Alerts Command
+        if msg_upper in ["CLEAR", "CLEAR ALERTS", "DELETE ALERTS", "RESET"]:
+            try:
+                response = requests.post(ORACLE_CLEAR_URL, timeout=10)
+                if response.status_code == 200:
+                    send_whatsapp_text(user_number, "✅ Saare purane alerts delete ho gaye hain!")
+                else:
+                    send_whatsapp_text(user_number, "❌ Oracle Error: Alerts delete nahi ho sake.")
+            except Exception as e:
+                send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
+            return
+
         if "ALERT" in msg_upper:
             prices = re.findall(r'\b\d+(?:\.\d+)?\b', user_message)
             words = msg_upper.replace("ALERT", "").replace("AND", "").replace("SET", "").split()
@@ -335,12 +346,10 @@ def process_message(user_number, user_message):
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
-        # 1. Fetch Data (4 API calls only)
         data_dict, current_price, live_data = fetch_market_data(pair)
         if not data_dict:
             send_whatsapp_text(user_number, f"❌ Data Error for {pair}: {live_data}"); return
             
-        # 2. Generate Charts from Saved Data (0 API calls)
         symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
         if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
         
@@ -349,7 +358,6 @@ def process_message(user_number, user_message):
         chart_1h = create_chart_from_df(data_dict["1h"], symbol, "1h")
         chart_5m = create_chart_from_df(data_dict["5min"], symbol, "5m")
         
-        # 3. AI Analysis
         ai_data = get_gemini_analysis(chart_w, chart_d, chart_1h, chart_5m, current_price, pair, live_data)
         
         for c in [chart_w, chart_d, chart_1h, chart_5m]: os.remove(c)
@@ -357,7 +365,6 @@ def process_message(user_number, user_message):
         if not ai_data:
             send_whatsapp_text(user_number, "❌ AI busy hai ya course text parse nahi hua. Thori dair baad try karein."); return
 
-        # 4. Strict RR Validation
         if ai_data.get('status') == 'ENTRY':
             try:
                 e_val = float(ai_data['entry']); s_val = float(ai_data['sl']); t_val = float(ai_data['tp'])
@@ -368,7 +375,6 @@ def process_message(user_number, user_message):
                     ai_data['alert_level'] = ai_data['entry']
             except: pass
             
-        # 5. Final Chart (0 API calls)
         final_chart_path = generate_final_chart_from_df(data_dict["5min"], pair, ai_data)
         
         message = f"🪙 {pair}\n📍 Current: {current_price}\n📝 Report: {ai_data.get('report', 'N/A')}\n"
@@ -381,7 +387,6 @@ def process_message(user_number, user_message):
             message += f"🚫 Status: NO TRADE\n💡 Reason: {ai_data.get('reason', 'N/A')}\n🎯 Alert Level: {ai_data.get('alert_level')}\n"
             if ai_data.get('zone_name'): message += f"📦 Zone: {ai_data.get('zone_name')} ({ai_data.get('zone_bottom')} - {ai_data.get('zone_top')})\n"
 
-        # 6. Send to WhatsApp
         status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Entry Chart")
         if status != "SUCCESS": send_whatsapp_text(user_number, status)
         else: send_whatsapp_text(user_number, message)
