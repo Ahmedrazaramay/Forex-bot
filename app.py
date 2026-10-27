@@ -88,12 +88,12 @@ def send_whatsapp_image(to, image_path, caption=""):
 # ==========================================
 # CHART FUNCTIONS
 # ==========================================
-def generate_basic_chart(pair):
+def generate_chart(pair, timeframe, output_size=40):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
         
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=5min&outputsize=40&apikey={TWELVEDATA_API_KEY}"
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={timeframe}&outputsize={output_size}&apikey={TWELVEDATA_API_KEY}"
     try:
         res = requests.get(url, timeout=10).json()
         if 'values' not in res:
@@ -105,8 +105,8 @@ def generate_basic_chart(pair):
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df = df.astype(float).sort_index()
 
-        chart_path = f"/tmp/{symbol.replace('/', '')}_basic.jpg"
-        title = f"{symbol} - 5M"
+        chart_path = f"/tmp/{symbol.replace('/', '')}_{timeframe}.jpg"
+        title = f"{symbol} - {timeframe.upper()}"
         
         mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', 
                  savefig=dict(fname=chart_path, bbox_inches='tight'))
@@ -140,8 +140,8 @@ def generate_final_chart(pair, ai_data, current_price):
         zone_bottom = float(ai_data['zone_bottom']) if ai_data.get('zone_bottom') else None
         zone_name = str(ai_data['zone_name']).upper() if ai_data.get('zone_name') else "POI"
 
-        chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
-        title = f"{symbol} - 5M"
+        chart_path = f"/tmp/{symbol.replace('/', '')}_final.jpg"
+        title = f"{symbol} - 5M Entry Chart"
         
         fig, axlist = mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', returnfig=True)
         ax = axlist[0]
@@ -173,46 +173,51 @@ def generate_final_chart(pair, ai_data, current_price):
         return f"❌ Chart Exception: {str(e)}"
 
 # ==========================================
-# AI ANALYSIS FUNCTION (SMART FALLBACK)
+# AI ANALYSIS FUNCTION
 # ==========================================
 def get_available_gemini_models():
-    """Google se models ki list mangwata hai aur latest se purane ki taraf sort karta hai."""
     valid_models = []
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
         res = requests.get(url, timeout=10).json()
-        
         if 'models' in res:
             for m in res['models']:
                 if 'generateContent' in m.get('supportedGenerationMethods', []):
                     name = m['name'].replace('models/', '')
                     if 'flash' in name or 'pro' in name:
                         valid_models.append(name)
-            
-            # Sort descending (3.8 > 3.6 > 3.5)
             valid_models.sort(reverse=True)
     except Exception as e:
         print("Model discovery failed:", e)
     
-    # Agar list khali aaye (network issue), toh yeh default list use hogi
     if not valid_models:
         valid_models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
-    
-    print(f"✅ Models to try: {valid_models}")
     return valid_models
 
-def get_gemini_analysis(image_path, current_price, pair):
-    with open(image_path, "rb") as image_file:
-        encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
+    with open(weekly, "rb") as f: encoded_weekly = base64.b64encode(f.read()).decode('utf-8')
+    with open(daily, "rb") as f: encoded_daily = base64.b64encode(f.read()).decode('utf-8')
+    with open(h1, "rb") as f: encoded_h1 = base64.b64encode(f.read()).decode('utf-8')
+    with open(m5, "rb") as f: encoded_m5 = base64.b64encode(f.read()).decode('utf-8')
 
     prompt = f"""
-    Analyze this chart for {pair} (Current Price: {current_price}).
+    Analyze these 4 charts for {pair} (Current Price: {current_price}).
+    
+    IMAGE ORDER:
+    - Image 1: WEEKLY Chart (Macro Bias)
+    - Image 2: DAILY Chart (Daily Trend / Major POI)
+    - Image 3: 1H Chart (Key Levels, POI, Liquidity)
+    - Image 4: 5M Chart (Entry: MSS, FVG, Displacement)
+    
+    Follow strict Top-Down SMC Analysis.
+    Additional Data: \n{live_data}\n
+
     You MUST respond with a valid JSON object ONLY. Do not include markdown formatting or backticks.
     The JSON must have exactly these keys:
     {{
       "report": "1 short line about market movement",
-      "trend": "Bullish or Bearish",
-      "h1": "Bullish or Bearish or Consolidation",
+      "trend": "Weekly/Daily Bias (e.g. Bullish)",
+      "h1": "1H Trend (e.g. Bearish/Consolidation)",
       "status": "ENTRY or NO TRADE",
       "reason": "1 short SMC reason in Roman Urdu",
       "entry": "Price or null",
@@ -225,10 +230,8 @@ def get_gemini_analysis(image_path, current_price, pair):
     }}
     """
 
-    # Models ki list nikalta hai (latest se oldest)
     models_to_try = get_available_gemini_models()
     
-    # Ek ek karke model try karega
     for model_name in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         headers = {'Content-Type': 'application/json'}
@@ -236,7 +239,10 @@ def get_gemini_analysis(image_path, current_price, pair):
             "contents": [{
                 "parts": [
                     {"text": prompt},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_string}}
+                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_weekly}},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_daily}},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_h1}},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_m5}}
                 ]
             }],
             "generationConfig": {
@@ -245,24 +251,21 @@ def get_gemini_analysis(image_path, current_price, pair):
             }
         }
 
-        for attempt in range(2): # Har model par 2 koshish (agar busy ho)
+        for attempt in range(2):
             try:
                 res = requests.post(url, headers=headers, json=payload, timeout=60).json()
                 
-                # Agar model busy hai (503), toh foran next model par jao
                 if 'error' in res and res['error'].get('code') == 503:
-                    print(f"{model_name} is busy. Switching to next model...")
+                    print(f"{model_name} busy. Switching...")
                     time.sleep(1)
                     break 
                 
-                # Agar jawab mil gaya
                 if 'candidates' in res:
                     text = res['candidates'][0]['content']['parts'][0]['text'].strip()
                     text = text.replace('```json', '').replace('```', '').strip()
-                    print(f"✅ Successfully analyzed using: {model_name}")
                     return json.loads(text)
                 
-                break # Aur koi error hua toh next model par jao
+                break 
                 
             except Exception as e:
                 print(f"Error with {model_name}: {str(e)}")
@@ -335,7 +338,7 @@ def process_message(user_number, user_message):
 
         greetings = ["HELLO", "HI", "HEY", "SALAM", "ASSALAM", "AO", "START", "BOSS"]
         if msg_upper in greetings:
-            send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main analysis shuru karoon. 😎")
+            send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main 4-Chart Top-Down analysis shuru karoon. 😎")
             return
 
         valid_keywords = ["XAU", "GOLD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
@@ -345,7 +348,7 @@ def process_message(user_number, user_message):
 
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         
-        send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
+        send_whatsapp_text(user_number, "⏳ 4 Charts (W, D, 1H, 5M) generate ho rahe hain aur AI analysis kar raha hai. Please wait...")
         
         live_data, current_price = get_live_data(pair)
         
@@ -356,13 +359,25 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, f"❌ TwelveData Error:\n{live_data}")
             return
             
-        basic_chart_path = generate_basic_chart(pair)
-        if basic_chart_path.startswith("❌"):
+        # Delay to avoid TwelveData rate limit (8 calls/min)
+        chart_w = generate_chart(pair, "1week", 30)
+        time.sleep(1)
+        chart_d = generate_chart(pair, "1day", 40)
+        time.sleep(1)
+        chart_1h = generate_chart(pair, "1h", 50)
+        time.sleep(1)
+        chart_5m = generate_chart(pair, "5min", 50)
+        
+        if chart_w.startswith("❌") or chart_d.startswith("❌") or chart_1h.startswith("❌") or chart_5m.startswith("❌"):
             send_whatsapp_text(user_number, "Chart generate nahi ho saka.")
             return
             
-        ai_data = get_gemini_analysis(basic_chart_path, current_price, pair)
-        os.remove(basic_chart_path)
+        ai_data = get_gemini_analysis(chart_w, chart_d, chart_1h, chart_5m, current_price, pair, live_data)
+        
+        os.remove(chart_w)
+        os.remove(chart_d)
+        os.remove(chart_1h)
+        os.remove(chart_5m)
         
         if not ai_data:
             send_whatsapp_text(user_number, "❌ AI ne jawab nahi diya ya saare models busy hain. Thori dair baad try karein.")
@@ -373,7 +388,7 @@ def process_message(user_number, user_message):
         message = f"🪙 {pair}\n"
         message += f"📍 Current: {current_price}\n"
         message += f"📝 Report: {ai_data.get('report', 'N/A')}\n"
-        message += f"📈 Trend: {ai_data.get('trend', 'N/A')} (Weekly + Daily)\n"
+        message += f"📈 Macro Trend: {ai_data.get('trend', 'N/A')}\n"
         message += f"📊 1H: {ai_data.get('h1', 'N/A')}\n"
         
         if ai_data.get('status') == 'ENTRY':
@@ -394,7 +409,7 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, message)
             send_whatsapp_text(user_number, final_chart_path)
         else:
-            status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Chart")
+            status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Entry Chart")
             if status != "SUCCESS":
                 send_whatsapp_text(user_number, status)
             else:
