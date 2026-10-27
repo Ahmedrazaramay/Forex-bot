@@ -301,8 +301,8 @@ def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper().strip()
         
-        # NEW: Clear Alerts Command
-        if msg_upper in ["CLEAR", "CLEAR ALERTS", "DELETE ALERTS", "RESET"]:
+        # NEW: Flexible Clear Alerts Command
+        if re.search(r'\b(clear|delete|remove|reset)\b.*\b(alert|alerts)\b', msg_upper) or msg_upper == "CLEAR":
             try:
                 response = requests.post(ORACLE_CLEAR_URL, timeout=10)
                 if response.status_code == 200:
