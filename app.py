@@ -24,6 +24,9 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
+# YAHAN MODEL KA NAAM FIX HAI (Aapko Render mein kuch add nahi karna)
+GEMINI_MODEL = "gemini-3.8-flash"
+
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 MY_WHATSAPP_NUMBER = "923003212360" 
 
@@ -199,8 +202,7 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
     🎯 Alert Level: [Price]
     """
 
-    # UPDATED: Using gemini-2.5-flash model
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{
