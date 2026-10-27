@@ -24,9 +24,6 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
-# YAHAN MODEL KA NAAM FIX HAI (Aapko Render mein kuch add nahi karna)
-GEMINI_MODEL = "gemini-3.8-flash"
-
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
 MY_WHATSAPP_NUMBER = "923003212360" 
 
@@ -202,24 +199,45 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
     🎯 Alert Level: [Price]
     """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    headers = {'Content-Type': 'application/json'}
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": "image/jpeg", "data": encoded_string}}
-            ]
-        }],
-        "generationConfig": {"temperature": 0.0}
-    }
+    # Fallback Models List (Agar pehla busy ho to doosra try karega)
+    models_to_try = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+    
+    for model_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        headers = {'Content-Type': 'application/json'}
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_string}}
+                ]
+            }],
+            "generationConfig": {"temperature": 0.0}
+        }
 
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=60).json()
-        text = res['candidates'][0]['content']['parts'][0]['text'].strip()
-        return text
-    except Exception as e:
-        return f"GEMINI ERROR: {str(e)} \n\nResponse: {res}"
+        # Retry Logic (3 baar koshish karega har model ke liye)
+        for attempt in range(3):
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=60).json()
+                
+                # Agar 503 (High Demand) error aye to thora wait karke dobara try karo
+                if 'error' in res and res['error'].get('code') == 503:
+                    print(f"{model_name} busy. Retrying in 2 seconds... (Attempt {attempt+1}/3)")
+                    time.sleep(2)
+                    continue
+                
+                # Agar jawab mil gaya to return kar do
+                if 'candidates' in res:
+                    return res['candidates'][0]['content']['parts'][0]['text'].strip()
+                
+                # Agar koi aur error aya to next model par jao
+                break
+                
+            except Exception as e:
+                print(f"Error with {model_name}: {str(e)}")
+                time.sleep(2)
+    
+    return "GEMINI ERROR: Google ke saare models abhi busy hain (503 High Demand). Thori dair baad dobara koshish karein."
 
 def get_live_data(pair):
     global data_cache
