@@ -136,34 +136,55 @@ def generate_final_chart(pair, ai_text, current_price):
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df = df.astype(float).sort_index()
 
-        entry_val = sl_val = tp_val = alert_val = None
+        entry_val = sl_val = tp_val = alert_val = zone_top = zone_bottom = None
+        zone_name = "POI"
+        
         entry_match = re.search(r"Entry[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         sl_match = re.search(r"SL[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         tp_match = re.search(r"TP[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         alert_match = re.search(r"Alert Level[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
+        zone_top_match = re.search(r"Zone Top[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
+        zone_bottom_match = re.search(r"Zone Bottom[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
+        zone_name_match = re.search(r"Zone Name[:\s*]*([A-Za-z]+)", ai_text, re.IGNORECASE)
 
         if entry_match: entry_val = float(entry_match.group(1))
         if sl_match: sl_val = float(sl_match.group(1))
         if tp_match: tp_val = float(tp_match.group(1))
         if alert_match: alert_val = float(alert_match.group(1))
-
-        hline_vals, hline_colors, hline_styles = [], [], []
-        if entry_val: hline_vals.append(entry_val); hline_colors.append('b'); hline_styles.append('-')
-        if sl_val: hline_vals.append(sl_val); hline_colors.append('r'); hline_styles.append('--')
-        if tp_val: hline_vals.append(tp_val); hline_colors.append('g'); hline_styles.append('--')
-        if alert_val: hline_vals.append(alert_val); hline_colors.append('y'); hline_styles.append('-')
+        if zone_top_match: zone_top = float(zone_top_match.group(1))
+        if zone_bottom_match: zone_bottom = float(zone_bottom_match.group(1))
+        if zone_name_match: zone_name = zone_name_match.group(1).upper()
 
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
         
-        plot_kwargs = dict(type='candle', style='charles', title=title, ylabel='Price', 
-                           savefig=dict(fname=chart_path, bbox_inches='tight'))
-        
-        if hline_vals:
-            plot_kwargs['hlines'] = dict(hlines=hline_vals, colors=hline_colors, linestyle=hline_styles, linewidths=1.5)
+        fig, axlist = mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', returnfig=True)
+        ax = axlist[0]
 
-        mpf.plot(df, **plot_kwargs)
-        plt.close('all') 
+        if entry_val: ax.axhline(entry_val, color='b', linestyle='-', linewidth=1.5, label='Entry')
+        if sl_val: ax.axhline(sl_val, color='r', linestyle='--', linewidth=1.5, label='SL')
+        if tp_val: ax.axhline(tp_val, color='g', linestyle='--', linewidth=1.5, label='TP')
+
+        if zone_top and zone_bottom:
+            # Draw the shaded rectangle
+            ax.axhspan(zone_bottom, zone_top, color='yellow', alpha=0.3)
+            ax.axhline(zone_top, color='orange', linestyle='-', linewidth=1)
+            ax.axhline(zone_bottom, color='orange', linestyle='-', linewidth=1)
+            
+            # Add Text Label inside the rectangle
+            y_center = (zone_top + zone_bottom) / 2
+            x_pos = len(df) - 2  # Position text near the right side of the chart
+            
+            ax.text(x_pos, y_center, f" {zone_name} ", 
+                    fontsize=12, color='black', fontweight='bold', 
+                    bbox=dict(facecolor='yellow', alpha=0.8, edgecolor='orange', boxstyle='round,pad=0.3'),
+                    verticalalignment='center', horizontalalignment='right')
+            
+        elif alert_val:
+            ax.axhline(alert_val, color='y', linestyle='-', linewidth=2.0, label='Alert Level')
+
+        fig.savefig(chart_path, bbox_inches='tight')
+        plt.close(fig) 
         return chart_path
     except Exception as e:
         return f"❌ Chart Exception: {str(e)}"
@@ -197,9 +218,11 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
     
     (If Status is NO TRADE):
     🎯 Alert Level: [Price]
+    🎯 Zone Top: [Price of FVG/OB top]
+    🎯 Zone Bottom: [Price of FVG/OB bottom]
+    🎯 Zone Name: [Write only FVG or OB]
     """
 
-    # Fallback Models List (Agar pehla busy ho to doosra try karega)
     models_to_try = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
     
     for model_name in models_to_try:
@@ -215,29 +238,25 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
             "generationConfig": {"temperature": 0.0}
         }
 
-        # Retry Logic (3 baar koshish karega har model ke liye)
         for attempt in range(3):
             try:
                 res = requests.post(url, headers=headers, json=payload, timeout=60).json()
                 
-                # Agar 503 (High Demand) error aye to thora wait karke dobara try karo
                 if 'error' in res and res['error'].get('code') == 503:
-                    print(f"{model_name} busy. Retrying in 2 seconds... (Attempt {attempt+1}/3)")
+                    print(f"{model_name} busy. Retrying in 2 seconds...")
                     time.sleep(2)
                     continue
                 
-                # Agar jawab mil gaya to return kar do
                 if 'candidates' in res:
                     return res['candidates'][0]['content']['parts'][0]['text'].strip()
                 
-                # Agar koi aur error aya to next model par jao
                 break
                 
             except Exception as e:
                 print(f"Error with {model_name}: {str(e)}")
                 time.sleep(2)
     
-    return "GEMINI ERROR: Google ke saare models abhi busy hain (503 High Demand). Thori dair baad dobara koshish karein."
+    return "GEMINI ERROR: Google ke saare models abhi busy hain. Thori dair baad koshish karein."
 
 def get_live_data(pair):
     global data_cache
