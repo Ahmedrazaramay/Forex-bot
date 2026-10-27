@@ -109,89 +109,92 @@ def send_whatsapp_image(to, image_path, caption=""):
     except Exception as e: return f"❌ Image Send Exception: {str(e)}"
 
 # ==========================================
-# CHART FUNCTIONS
+# DATA FETCHING (Optimized to 4 API calls total)
 # ==========================================
-def generate_chart(pair, timeframe, output_size=40):
+def fetch_market_data(pair):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
-        
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={timeframe}&outputsize={output_size}&apikey={TWELVEDATA_API_KEY}"
-    try:
-        res = requests.get(url, timeout=10).json()
-        if 'values' not in res: 
-            return f"❌ Chart Data Error: {res}"
+    
+    timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
+    data_dict = {}
+    live_text = ""
+    current_price = 0
+    
+    # We need to respect the 8 calls/min limit. 4 calls are safe.
+    for tf_name, tf_code in timeframes.items():
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=50&apikey={TWELVEDATA_API_KEY}"
+        try:
+            res = requests.get(url, timeout=10).json()
+            if 'values' in res:
+                df = pd.DataFrame(res['values'])
+                df['datetime'] = pd.to_datetime(df['datetime'])
+                df = df.set_index('datetime')
+                df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
+                df = df.astype(float).sort_index()
+                data_dict[tf_code] = df
+                
+                if tf_code == "5min": current_price = df['Close'].iloc[-1]
+                
+                live_text += f"--- {tf_name} ---\n"
+                for c in res['values'][:20]: # Only last 20 candles for text to save tokens
+                    live_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
+            else:
+                return None, None, f"API_ERROR: {res.get('message', str(res))}"
+        except Exception as e:
+            return None, None, f"API_ERROR: {str(e)}"
+            
+    return data_dict, current_price, live_text
 
-        df = pd.DataFrame(res['values'])
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        df = df.set_index('datetime')
-        df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
-        df = df.astype(float).sort_index()
+# ==========================================
+# CHART FUNCTIONS (Using saved data, 0 API calls)
+# ==========================================
+def create_chart_from_df(df, symbol, timeframe):
+    chart_path = f"/tmp/{symbol.replace('/', '')}_{timeframe}.jpg"
+    title = f"{symbol} - {timeframe.upper()}"
+    mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', savefig=dict(fname=chart_path, bbox_inches='tight'))
+    plt.close('all') 
+    return chart_path
 
-        chart_path = f"/tmp/{symbol.replace('/', '')}_{timeframe}.jpg"
-        title = f"{symbol} - {timeframe.upper()}"
-        
-        mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', savefig=dict(fname=chart_path, bbox_inches='tight'))
-        plt.close('all') 
-        return chart_path
-    except Exception as e: 
-        return f"❌ Chart Exception: {str(e)}"
-
-def generate_final_chart(pair, ai_data, current_price):
+def generate_final_chart_from_df(df, pair, ai_data):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
+
+    entry_val = float(ai_data['entry']) if ai_data.get('entry') else None
+    sl_val = float(ai_data['sl']) if ai_data.get('sl') else None
+    tp_val = float(ai_data['tp']) if ai_data.get('tp') else None
+    alert_val = float(ai_data['alert_level']) if ai_data.get('alert_level') else None
+    zone_top = float(ai_data['zone_top']) if ai_data.get('zone_top') else None
+    zone_bottom = float(ai_data['zone_bottom']) if ai_data.get('zone_bottom') else None
+    zone_name = str(ai_data['zone_name']).upper() if ai_data.get('zone_name') else "POI"
+
+    chart_path = f"/tmp/{symbol.replace('/', '')}_final.jpg"
+    title = f"{symbol} - 5M Entry Chart"
+    
+    fig, axlist = mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', returnfig=True)
+    ax = axlist[0]
+
+    if entry_val: ax.axhline(entry_val, color='b', linestyle='-', linewidth=1.5, label='Entry')
+    if sl_val: ax.axhline(sl_val, color='r', linestyle='--', linewidth=1.5, label='SL')
+    if tp_val: ax.axhline(tp_val, color='g', linestyle='--', linewidth=1.5, label='TP')
+
+    if zone_top and zone_bottom:
+        ax.axhspan(zone_bottom, zone_top, color='yellow', alpha=0.3)
+        ax.axhline(zone_top, color='orange', linestyle='-', linewidth=1)
+        ax.axhline(zone_bottom, color='orange', linestyle='-', linewidth=1)
         
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=5min&outputsize=40&apikey={TWELVEDATA_API_KEY}"
-    try:
-        res = requests.get(url, timeout=10).json()
+        y_center = (zone_top + zone_bottom) / 2
+        x_pos = len(df) - 2
         
-        # FIX: Yahan check lagaya hai taake 'values' error na aaye
-        if 'values' not in res:
-            return f"❌ Final Chart Data Error (API Limit?): {res}"
-            
-        df = pd.DataFrame(res['values'])
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        df = df.set_index('datetime')
-        df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
-        df = df.astype(float).sort_index()
-
-        entry_val = float(ai_data['entry']) if ai_data.get('entry') else None
-        sl_val = float(ai_data['sl']) if ai_data.get('sl') else None
-        tp_val = float(ai_data['tp']) if ai_data.get('tp') else None
-        alert_val = float(ai_data['alert_level']) if ai_data.get('alert_level') else None
-        zone_top = float(ai_data['zone_top']) if ai_data.get('zone_top') else None
-        zone_bottom = float(ai_data['zone_bottom']) if ai_data.get('zone_bottom') else None
-        zone_name = str(ai_data['zone_name']).upper() if ai_data.get('zone_name') else "POI"
-
-        chart_path = f"/tmp/{symbol.replace('/', '')}_final.jpg"
-        title = f"{symbol} - 5M Entry Chart"
+        ax.text(x_pos, y_center, f" {zone_name} ", fontsize=12, color='black', fontweight='bold', 
+                bbox=dict(facecolor='yellow', alpha=0.8, edgecolor='orange', boxstyle='round,pad=0.3'),
+                verticalalignment='center', horizontalalignment='right')
         
-        fig, axlist = mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', returnfig=True)
-        ax = axlist[0]
+    elif alert_val:
+        ax.axhline(alert_val, color='y', linestyle='-', linewidth=2.0, label='Alert Level')
 
-        if entry_val: ax.axhline(entry_val, color='b', linestyle='-', linewidth=1.5, label='Entry')
-        if sl_val: ax.axhline(sl_val, color='r', linestyle='--', linewidth=1.5, label='SL')
-        if tp_val: ax.axhline(tp_val, color='g', linestyle='--', linewidth=1.5, label='TP')
-
-        if zone_top and zone_bottom:
-            ax.axhspan(zone_bottom, zone_top, color='yellow', alpha=0.3)
-            ax.axhline(zone_top, color='orange', linestyle='-', linewidth=1)
-            ax.axhline(zone_bottom, color='orange', linestyle='-', linewidth=1)
-            
-            y_center = (zone_top + zone_bottom) / 2
-            x_pos = len(df) - 2
-            
-            ax.text(x_pos, y_center, f" {zone_name} ", fontsize=12, color='black', fontweight='bold', 
-                    bbox=dict(facecolor='yellow', alpha=0.8, edgecolor='orange', boxstyle='round,pad=0.3'),
-                    verticalalignment='center', horizontalalignment='right')
-            
-        elif alert_val:
-            ax.axhline(alert_val, color='y', linestyle='-', linewidth=2.0, label='Alert Level')
-
-        fig.savefig(chart_path, bbox_inches='tight')
-        plt.close(fig) 
-        return chart_path
-    except Exception as e: 
-        return f"❌ Chart Exception: {str(e)}"
+    fig.savefig(chart_path, bbox_inches='tight')
+    plt.close(fig) 
+    return chart_path
 
 # ==========================================
 # AI ANALYSIS FUNCTION
@@ -229,7 +232,6 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
     - Image 4: 5M Chart
     
     --- COURSE RULES (FOLLOW THESE STRICTLY) ---
-    
     [MACRO BIAS RULES - Apply to Weekly & Daily Charts]
     {rules['macro']}
     
@@ -238,7 +240,6 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
     
     [ENTRY RULES - Apply to 1H & 5M Charts]
     {rules['entry']}
-    
     ---------------------------------------------
     Additional Data: \n{live_data}\n
 
@@ -294,33 +295,6 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
                 time.sleep(1)
     return None
 
-def get_live_data(pair):
-    global data_cache
-    symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
-    if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
-
-    now = time.time()
-    if symbol in data_cache:
-        cached_time, cached_data, cached_price = data_cache[symbol]
-        if now - cached_time < CACHE_EXPIRY: return cached_data, cached_price
-    
-    timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 60), "5M": ("5min", 60)}
-    data_text = ""; current_price = 0
-    
-    for tf_name, (tf_code, tf_size) in timeframes.items():
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize={tf_size}&apikey={TWELVEDATA_API_KEY}"
-        try:
-            res = requests.get(url, timeout=10).json()
-            if 'values' in res:
-                if tf_code == "5min": current_price = res['values'][0]['close']
-                data_text += f"--- {tf_name} ---\n"
-                for c in res['values']: data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
-            else: return f"API_ERROR: {res.get('message', str(res))}", None
-        except Exception as e: return f"API_ERROR: {str(e)}", None
-            
-    data_cache[symbol] = (now, data_text, current_price)
-    return data_text, current_price
-
 # ==========================================
 # MAIN PROCESS LOGIC
 # ==========================================
@@ -359,22 +333,23 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, "Bhai, valid pair likhein (e.g., EURUSD, XAUUSD, BTCUSD)."); return
 
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
-        
-        # MESSAGE FIXED HERE
         send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
-        live_data, current_price = get_live_data(pair)
-        if not live_data or live_data.startswith("API_ERROR:"):
-            send_whatsapp_text(user_number, f"❌ Data Error for {pair}"); return
+        # 1. Fetch Data (4 API calls only)
+        data_dict, current_price, live_data = fetch_market_data(pair)
+        if not data_dict:
+            send_whatsapp_text(user_number, f"❌ Data Error for {pair}: {live_data}"); return
             
-        chart_w = generate_chart(pair, "1week", 30); time.sleep(1)
-        chart_d = generate_chart(pair, "1day", 40); time.sleep(1)
-        chart_1h = generate_chart(pair, "1h", 50); time.sleep(1)
-        chart_5m = generate_chart(pair, "5min", 50)
+        # 2. Generate Charts from Saved Data (0 API calls)
+        symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
+        if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
         
-        if any(c.startswith("❌") for c in [chart_w, chart_d, chart_1h, chart_5m]):
-            send_whatsapp_text(user_number, "Chart generate nahi ho saka."); return
-            
+        chart_w = create_chart_from_df(data_dict["1week"], symbol, "1week")
+        chart_d = create_chart_from_df(data_dict["1day"], symbol, "1day")
+        chart_1h = create_chart_from_df(data_dict["1h"], symbol, "1h")
+        chart_5m = create_chart_from_df(data_dict["5min"], symbol, "5m")
+        
+        # 3. AI Analysis
         ai_data = get_gemini_analysis(chart_w, chart_d, chart_1h, chart_5m, current_price, pair, live_data)
         
         for c in [chart_w, chart_d, chart_1h, chart_5m]: os.remove(c)
@@ -382,6 +357,7 @@ def process_message(user_number, user_message):
         if not ai_data:
             send_whatsapp_text(user_number, "❌ AI busy hai ya course text parse nahi hua. Thori dair baad try karein."); return
 
+        # 4. Strict RR Validation
         if ai_data.get('status') == 'ENTRY':
             try:
                 e_val = float(ai_data['entry']); s_val = float(ai_data['sl']); t_val = float(ai_data['tp'])
@@ -392,7 +368,8 @@ def process_message(user_number, user_message):
                     ai_data['alert_level'] = ai_data['entry']
             except: pass
             
-        final_chart_path = generate_final_chart(pair, ai_data, current_price)
+        # 5. Final Chart (0 API calls)
+        final_chart_path = generate_final_chart_from_df(data_dict["5min"], pair, ai_data)
         
         message = f"🪙 {pair}\n📍 Current: {current_price}\n📝 Report: {ai_data.get('report', 'N/A')}\n"
         message += f"📈 Macro Trend: {ai_data.get('trend', 'N/A')}\n📊 1H: {ai_data.get('h1', 'N/A')}\n"
@@ -404,13 +381,11 @@ def process_message(user_number, user_message):
             message += f"🚫 Status: NO TRADE\n💡 Reason: {ai_data.get('reason', 'N/A')}\n🎯 Alert Level: {ai_data.get('alert_level')}\n"
             if ai_data.get('zone_name'): message += f"📦 Zone: {ai_data.get('zone_name')} ({ai_data.get('zone_bottom')} - {ai_data.get('zone_top')})\n"
 
-        if final_chart_path.startswith("❌"):
-            send_whatsapp_text(user_number, message); send_whatsapp_text(user_number, final_chart_path)
-        else:
-            status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Entry Chart")
-            if status != "SUCCESS": send_whatsapp_text(user_number, status)
-            else: send_whatsapp_text(user_number, message)
-            os.remove(final_chart_path) 
+        # 6. Send to WhatsApp
+        status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Entry Chart")
+        if status != "SUCCESS": send_whatsapp_text(user_number, status)
+        else: send_whatsapp_text(user_number, message)
+        os.remove(final_chart_path) 
         
     except Exception as e:
         send_whatsapp_text(user_number, f"SYSTEM ERROR: {str(e)}")
