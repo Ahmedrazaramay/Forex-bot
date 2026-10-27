@@ -119,7 +119,7 @@ def generate_basic_chart(pair):
     except Exception as e:
         return f"❌ Chart Exception: {str(e)}"
 
-def generate_final_chart(pair, ai_text, current_price):
+def generate_final_chart(pair, ai_data, current_price):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
@@ -136,24 +136,14 @@ def generate_final_chart(pair, ai_text, current_price):
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df = df.astype(float).sort_index()
 
-        entry_val = sl_val = tp_val = alert_val = zone_top = zone_bottom = None
-        zone_name = "POI"
-        
-        entry_match = re.search(r"Entry[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
-        sl_match = re.search(r"SL[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
-        tp_match = re.search(r"TP[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
-        alert_match = re.search(r"Alert Level[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
-        zone_top_match = re.search(r"Zone Top[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
-        zone_bottom_match = re.search(r"Zone Bottom[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
-        zone_name_match = re.search(r"Zone Name[:\s*]*([A-Za-z]+)", ai_text, re.IGNORECASE)
-
-        if entry_match: entry_val = float(entry_match.group(1))
-        if sl_match: sl_val = float(sl_match.group(1))
-        if tp_match: tp_val = float(tp_match.group(1))
-        if alert_match: alert_val = float(alert_match.group(1))
-        if zone_top_match: zone_top = float(zone_top_match.group(1))
-        if zone_bottom_match: zone_bottom = float(zone_bottom_match.group(1))
-        if zone_name_match: zone_name = zone_name_match.group(1).upper()
+        # Parse data from JSON safely
+        entry_val = float(ai_data['entry']) if ai_data.get('entry') else None
+        sl_val = float(ai_data['sl']) if ai_data.get('sl') else None
+        tp_val = float(ai_data['tp']) if ai_data.get('tp') else None
+        alert_val = float(ai_data['alert_level']) if ai_data.get('alert_level') else None
+        zone_top = float(ai_data['zone_top']) if ai_data.get('zone_top') else None
+        zone_bottom = float(ai_data['zone_bottom']) if ai_data.get('zone_bottom') else None
+        zone_name = str(ai_data['zone_name']).upper() if ai_data.get('zone_name') else "POI"
 
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
@@ -187,38 +177,28 @@ def generate_final_chart(pair, ai_text, current_price):
     except Exception as e:
         return f"❌ Chart Exception: {str(e)}"
 
-def get_gemini_analysis(image_path, live_data, current_price, pair):
+def get_gemini_analysis(image_path, current_price, pair):
     with open(image_path, "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
 
     prompt = f"""
-    You are a strict SMC/ICT Forex Day Trading Bot.
-    Analyze the attached chart image along with the data provided.
-    Pair: {pair}
-    Current Price: {current_price}
-    Live Data:\n{live_data}\n
-    
-    Output EXACTLY in this format (No intro, No outro):
-    
-    🪙 {pair}
-    📍 Current: {current_price}
-    📝 Report: [1 short line about market movement]
-    [📈 or 📉] Trend: [Bullish/Bearish] (Weekly + Daily)
-    📊 1H: [Bullish/Bearish/Consolidation]
-    [✅ or 🚫] Status: [ENTRY / NO TRADE]
-    💡 Reason: [1 short SMC reason in Roman Urdu]
-    
-    (If Status is ENTRY):
-    🎯 Entry: [Price]
-    🛑 SL: [Price]
-    💰 TP: [Price]
-    ⚖️ RR: 1:3
-    
-    (If Status is NO TRADE):
-    🎯 Alert Level: [Price]
-    🎯 Zone Top: [Price of FVG/OB top]
-    🎯 Zone Bottom: [Price of FVG/OB bottom]
-    🎯 Zone Name: [Write only FVG or OB]
+    Analyze this chart for {pair} (Current Price: {current_price}).
+    You MUST respond with a valid JSON object ONLY. Do not include markdown formatting or backticks.
+    The JSON must have exactly these keys:
+    {{
+      "report": "1 short line about market movement",
+      "trend": "Bullish or Bearish",
+      "h1": "Bullish or Bearish or Consolidation",
+      "status": "ENTRY or NO TRADE",
+      "reason": "1 short SMC reason in Roman Urdu",
+      "entry": "Price or null",
+      "sl": "Price or null",
+      "tp": "Price or null",
+      "alert_level": "Price or null",
+      "zone_top": "Price or null",
+      "zone_bottom": "Price or null",
+      "zone_name": "FVG or OB or null"
+    }}
     """
 
     models_to_try = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
@@ -235,7 +215,7 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
             }],
             "generationConfig": {
                 "temperature": 0.0,
-                "maxOutputTokens": 1000 # FIX: Ensure full response is not cut off
+                "response_mime_type": "application/json" # Forces Gemini to output JSON
             }
         }
 
@@ -244,12 +224,14 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
                 res = requests.post(url, headers=headers, json=payload, timeout=60).json()
                 
                 if 'error' in res and res['error'].get('code') == 503:
-                    print(f"{model_name} busy. Retrying in 2 seconds...")
                     time.sleep(2)
                     continue
                 
                 if 'candidates' in res:
-                    return res['candidates'][0]['content']['parts'][0]['text'].strip()
+                    text = res['candidates'][0]['content']['parts'][0]['text'].strip()
+                    # Clean up if Gemini adds markdown backticks
+                    text = text.replace('```json', '').replace('```', '').strip()
+                    return json.loads(text)
                 
                 break
                 
@@ -257,20 +239,17 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
                 print(f"Error with {model_name}: {str(e)}")
                 time.sleep(2)
     
-    return "GEMINI ERROR: Google ke saare models abhi busy hain. Thori dair baad koshish karein."
+    return None
 
 def get_live_data(pair):
     global data_cache
-    
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
-    if "/" not in symbol and len(symbol) == 6:
-        symbol = symbol[:3] + "/" + symbol[3:]
+    if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
 
     now = time.time()
     if symbol in data_cache:
         cached_time, cached_data, cached_price = data_cache[symbol]
-        if now - cached_time < CACHE_EXPIRY:
-            return cached_data, cached_price
+        if now - cached_time < CACHE_EXPIRY: return cached_data, cached_price
     
     timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 60), "5M": ("5min", 60)}
     data_text = ""
@@ -281,14 +260,12 @@ def get_live_data(pair):
         try:
             res = requests.get(url, timeout=10).json()
             if 'values' in res:
-                if tf_code == "5min":
-                    current_price = res['values'][0]['close']
+                if tf_code == "5min": current_price = res['values'][0]['close']
                 data_text += f"--- {tf_name} ---\n"
                 for c in res['values']:
                     data_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                err_msg = res.get('message', str(res))
-                return f"API_ERROR: {err_msg}", None
+                return f"API_ERROR: {res.get('message', str(res))}", None
         except Exception as e:
             return f"API_ERROR: {str(e)}", None
             
@@ -308,11 +285,9 @@ def process_message(user_number, user_message):
             pair = "XAU/USD"
             
             for part in parts:
-                try:
-                    price_level = float(part)
+                try: price_level = float(part)
                 except ValueError:
-                    if len(part) >= 3 and part != "ALERT":
-                        pair = part
+                    if len(part) >= 3 and part != "ALERT": pair = part
             
             if price_level:
                 try:
@@ -357,26 +332,45 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, "Chart generate nahi ho saka.")
             return
             
-        analysis = get_gemini_analysis(basic_chart_path, live_data, current_price, pair)
+        ai_data = get_gemini_analysis(basic_chart_path, current_price, pair)
         os.remove(basic_chart_path)
         
-        if analysis.startswith("GEMINI ERROR:"):
-            send_whatsapp_text(user_number, analysis)
+        if not ai_data:
+            send_whatsapp_text(user_number, "❌ AI ne jawab nahi diya ya saare models busy hain. Thori dair baad try karein.")
             return
             
-        final_chart_path = generate_final_chart(pair, analysis, current_price)
+        final_chart_path = generate_final_chart(pair, ai_data, current_price)
         
+        # Format the message beautifully in Python
+        message = f"🪙 {pair}\n"
+        message += f"📍 Current: {current_price}\n"
+        message += f"📝 Report: {ai_data.get('report', 'N/A')}\n"
+        message += f"📈 Trend: {ai_data.get('trend', 'N/A')} (Weekly + Daily)\n"
+        message += f"📊 1H: {ai_data.get('h1', 'N/A')}\n"
+        
+        if ai_data.get('status') == 'ENTRY':
+            message += f"✅ Status: ENTRY\n"
+            message += f"💡 Reason: {ai_data.get('reason', 'N/A')}\n"
+            message += f"🎯 Entry: {ai_data.get('entry')}\n"
+            message += f"🛑 SL: {ai_data.get('sl')}\n"
+            message += f"💰 TP: {ai_data.get('tp')}\n"
+            message += f"⚖️ RR: 1:3\n"
+        else:
+            message += f"🚫 Status: NO TRADE\n"
+            message += f"💡 Reason: {ai_data.get('reason', 'N/A')}\n"
+            message += f"🎯 Alert Level: {ai_data.get('alert_level')}\n"
+            if ai_data.get('zone_name'):
+                message += f"📦 Zone: {ai_data.get('zone_name')} ({ai_data.get('zone_bottom')} - {ai_data.get('zone_top')})\n"
+
         if final_chart_path.startswith("❌"):
-            send_whatsapp_text(user_number, analysis)
+            send_whatsapp_text(user_number, message)
             send_whatsapp_text(user_number, final_chart_path)
         else:
-            # FIX: Send image first with a short caption, then send the full text as a separate message
             status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Chart")
             if status != "SUCCESS":
                 send_whatsapp_text(user_number, status)
             else:
-                # Send the full analysis as a separate text message
-                send_whatsapp_text(user_number, analysis)
+                send_whatsapp_text(user_number, message)
             
             os.remove(final_chart_path) 
         
@@ -387,12 +381,10 @@ def process_message(user_number, user_message):
 # ROUTES
 # ==========================================
 @app.route('/ping', methods=['GET'])
-def ping():
-    return "Alive", 200
+def ping(): return "Alive", 200
 
 @app.route('/', methods=['GET'])
-def home():
-    return "Alive", 200
+def home(): return "Alive", 200
 
 @app.route('/trigger_analysis', methods=['POST'])
 def trigger_analysis():
