@@ -109,7 +109,7 @@ def send_whatsapp_image(to, image_path, caption=""):
     except Exception as e: return f"❌ Image Send Exception: {str(e)}"
 
 # ==========================================
-# DATA FETCHING
+# DATA FETCHING & PYTHON TREND CALCULATION
 # ==========================================
 def fetch_market_data(pair):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
@@ -119,6 +119,7 @@ def fetch_market_data(pair):
     data_dict = {}
     live_text = ""
     current_price = 0
+    python_bias = "NEUTRAL"
     
     for tf_name, tf_code in timeframes.items():
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=50&apikey={TWELVEDATA_API_KEY}"
@@ -134,15 +135,23 @@ def fetch_market_data(pair):
                 
                 if tf_code == "5min": current_price = df['Close'].iloc[-1]
                 
+                # Python Trend Logic (EMA 50 on Daily)
+                if tf_code == "1day":
+                    df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
+                    if current_price < df['EMA_50'].iloc[-1]:
+                        python_bias = "BEARISH"
+                    else:
+                        python_bias = "BULLISH"
+
                 live_text += f"--- {tf_name} ---\n"
                 for c in res['values'][:20]:
                     live_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None, None, f"API_ERROR: {res.get('message', str(res))}"
+                return None, None, None, f"API_ERROR: {res.get('message', str(res))}"
         except Exception as e:
-            return None, None, f"API_ERROR: {str(e)}"
+            return None, None, None, f"API_ERROR: {str(e)}"
             
-    return data_dict, current_price, live_text
+    return data_dict, current_price, python_bias, live_text
 
 # ==========================================
 # CHART FUNCTIONS
@@ -213,7 +222,7 @@ def get_available_gemini_models():
     if not valid_models: valid_models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
     return valid_models
 
-def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
+def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, python_bias, live_data):
     rules = fetch_course_rules()
     
     with open(weekly, "rb") as f: encoded_weekly = base64.b64encode(f.read()).decode('utf-8')
@@ -230,14 +239,21 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
     - Image 3: 1H Chart
     - Image 4: 5M Chart
     
+    --- CRITICAL INSTRUCTION ---
+    The Python system has mathematically calculated the Daily Trend (EMA 50) and confirmed it is: {python_bias}.
+    YOU MUST AGREE WITH THIS MACRO BIAS.
+    
+    If the Bias is BEARISH, you MUST look for SELL setups only. Do NOT look for buys.
+    If the Bias is BULLISH, you MUST look for BUY setups only. Do NOT look for sells.
+    
     --- COURSE RULES (FOLLOW THESE STRICTLY) ---
-    [MACRO BIAS RULES - Apply to Weekly & Daily Charts]
+    [MACRO BIAS RULES]
     {rules['macro']}
     
-    [1H STRUCTURE RULES - Apply to 1H Chart]
+    [1H STRUCTURE RULES]
     {rules['structure']}
     
-    [ENTRY RULES - Apply to 1H & 5M Charts]
+    [ENTRY RULES]
     {rules['entry']}
     ---------------------------------------------
     Additional Data: \n{live_data}\n
@@ -248,8 +264,8 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, live_data):
     The JSON must have exactly these keys:
     {{
       "report": "1 short line about market movement",
-      "trend": "Weekly/Daily Bias (e.g. Bullish)",
-      "h1": "1H Trend (e.g. Bearish/Consolidation)",
+      "trend": "{python_bias}",
+      "h1": "1H Trend",
       "status": "ENTRY or NO TRADE",
       "reason": "1 short SMC reason in Roman Urdu",
       "entry": "Price or null",
@@ -301,16 +317,12 @@ def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper().strip()
         
-        # FOOLPROOF CLEAR ALERTS CHECK
         if "CLEAR" in msg_upper or "DELETE" in msg_upper or "RESET" in msg_upper or "REMOVE" in msg_upper:
             try:
                 response = requests.post(ORACLE_CLEAR_URL, timeout=10)
-                if response.status_code == 200:
-                    send_whatsapp_text(user_number, "✅ Saare purane alerts delete ho gaye hain!")
-                else:
-                    send_whatsapp_text(user_number, "❌ Oracle Error: Alerts delete nahi ho sake.")
-            except Exception as e:
-                send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
+                if response.status_code == 200: send_whatsapp_text(user_number, "✅ Saare purane alerts delete ho gaye hain!")
+                else: send_whatsapp_text(user_number, "❌ Oracle Error: Alerts delete nahi ho sake.")
+            except Exception as e: send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
             return
 
         if "ALERT" in msg_upper:
@@ -346,7 +358,8 @@ def process_message(user_number, user_message):
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
-        data_dict, current_price, live_data = fetch_market_data(pair)
+        # Yahan Python Trend Calculate kar raha hai
+        data_dict, current_price, python_bias, live_data = fetch_market_data(pair)
         if not data_dict:
             send_whatsapp_text(user_number, f"❌ Data Error for {pair}: {live_data}"); return
             
@@ -358,13 +371,15 @@ def process_message(user_number, user_message):
         chart_1h = create_chart_from_df(data_dict["1h"], symbol, "1h")
         chart_5m = create_chart_from_df(data_dict["5min"], symbol, "5m")
         
-        ai_data = get_gemini_analysis(chart_w, chart_d, chart_1h, chart_5m, current_price, pair, live_data)
+        # AI ko Python ka nikal hua trend de rahe hain
+        ai_data = get_gemini_analysis(chart_w, chart_d, chart_1h, chart_5m, current_price, pair, python_bias, live_data)
         
         for c in [chart_w, chart_d, chart_1h, chart_5m]: os.remove(c)
         
         if not ai_data:
             send_whatsapp_text(user_number, "❌ AI busy hai ya course text parse nahi hua. Thori dair baad try karein."); return
 
+        # Strict RR Validation (Python side)
         if ai_data.get('status') == 'ENTRY':
             try:
                 e_val = float(ai_data['entry']); s_val = float(ai_data['sl']); t_val = float(ai_data['tp'])
