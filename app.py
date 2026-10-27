@@ -64,7 +64,7 @@ def send_whatsapp_text(to, text):
     except Exception as e:
         print("SEND TEXT ERROR:", e)
 
-def send_whatsapp_image(to, image_path, caption):
+def send_whatsapp_image(to, image_path, caption=""):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/media"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
     files = {'file': open(image_path, 'rb')}
@@ -166,14 +166,12 @@ def generate_final_chart(pair, ai_text, current_price):
         if tp_val: ax.axhline(tp_val, color='g', linestyle='--', linewidth=1.5, label='TP')
 
         if zone_top and zone_bottom:
-            # Draw the shaded rectangle
             ax.axhspan(zone_bottom, zone_top, color='yellow', alpha=0.3)
             ax.axhline(zone_top, color='orange', linestyle='-', linewidth=1)
             ax.axhline(zone_bottom, color='orange', linestyle='-', linewidth=1)
             
-            # Add Text Label inside the rectangle
             y_center = (zone_top + zone_bottom) / 2
-            x_pos = len(df) - 2  # Position text near the right side of the chart
+            x_pos = len(df) - 2
             
             ax.text(x_pos, y_center, f" {zone_name} ", 
                     fontsize=12, color='black', fontweight='bold', 
@@ -235,7 +233,10 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
                     {"inline_data": {"mime_type": "image/jpeg", "data": encoded_string}}
                 ]
             }],
-            "generationConfig": {"temperature": 0.0}
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 1000 # FIX: Ensure full response is not cut off
+            }
         }
 
         for attempt in range(3):
@@ -369,10 +370,14 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, analysis)
             send_whatsapp_text(user_number, final_chart_path)
         else:
-            status = send_whatsapp_image(user_number, final_chart_path, analysis)
+            # FIX: Send image first with a short caption, then send the full text as a separate message
+            status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Chart")
             if status != "SUCCESS":
-                send_whatsapp_text(user_number, analysis)
                 send_whatsapp_text(user_number, status)
+            else:
+                # Send the full analysis as a separate text message
+                send_whatsapp_text(user_number, analysis)
+            
             os.remove(final_chart_path) 
         
     except Exception as e:
