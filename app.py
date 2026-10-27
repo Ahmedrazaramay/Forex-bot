@@ -169,7 +169,6 @@ def generate_final_chart(pair, ai_text, current_price):
         return f"❌ Chart Exception: {str(e)}"
 
 def get_gemini_analysis(image_path, live_data, current_price, pair):
-    # Read image and encode to base64
     with open(image_path, "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
 
@@ -200,7 +199,8 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
     🎯 Alert Level: [Price]
     """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key={GEMINI_API_KEY}"
+    # UPDATED: Using gemini-2.5-flash model
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{
@@ -214,7 +214,6 @@ def get_gemini_analysis(image_path, live_data, current_price, pair):
 
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=60).json()
-        # Gemini response parsing
         text = res['candidates'][0]['content']['parts'][0]['text'].strip()
         return text
     except Exception as e:
@@ -313,13 +312,11 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, f"❌ TwelveData Error:\n{live_data}")
             return
             
-        # Step 1: Generate Basic Chart for Gemini to look at
         basic_chart_path = generate_basic_chart(pair)
         if basic_chart_path.startswith("❌"):
             send_whatsapp_text(user_number, "Chart generate nahi ho saka.")
             return
             
-        # Step 2: Send to Gemini Pro
         analysis = get_gemini_analysis(basic_chart_path, live_data, current_price, pair)
         os.remove(basic_chart_path)
         
@@ -327,7 +324,6 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, analysis)
             return
             
-        # Step 3: Generate Final Chart with lines based on Gemini's analysis
         final_chart_path = generate_final_chart(pair, analysis, current_price)
         
         if final_chart_path.startswith("❌"):
