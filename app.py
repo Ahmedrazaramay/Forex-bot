@@ -9,6 +9,8 @@ import mplfinance as mpf
 import matplotlib.pyplot as plt
 import re
 import time
+import base64
+import json
 from datetime import datetime
 
 app = Flask(__name__)
@@ -19,7 +21,7 @@ app = Flask(__name__)
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_secret_forex_bot_123").strip()
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 
 ORACLE_API_URL = "http://141.145.158.62:5000/set_alert"
@@ -48,7 +50,7 @@ def is_duplicate(msg_id):
 # CACHE STORAGE
 # ==========================================
 data_cache = {}
-CACHE_EXPIRY = 300 # 5 minutes
+CACHE_EXPIRY = 300
 
 # ==========================================
 # WHATSAPP FUNCTIONS
@@ -90,7 +92,34 @@ def send_whatsapp_image(to, image_path, caption):
 # ==========================================
 # CHART & AI FUNCTIONS
 # ==========================================
-def generate_chart(pair, ai_text, current_price):
+def generate_basic_chart(pair):
+    symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
+    if "/" not in symbol and len(symbol) == 6:
+        symbol = symbol[:3] + "/" + symbol[3:]
+        
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=5min&outputsize=40&apikey={TWELVEDATA_API_KEY}"
+    try:
+        res = requests.get(url, timeout=10).json()
+        if 'values' not in res:
+            return f"❌ Chart Data Error: {res}"
+
+        df = pd.DataFrame(res['values'])
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df = df.set_index('datetime')
+        df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
+        df = df.astype(float).sort_index()
+
+        chart_path = f"/tmp/{symbol.replace('/', '')}_basic.jpg"
+        title = f"{symbol} - 5M"
+        
+        mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', 
+                 savefig=dict(fname=chart_path, bbox_inches='tight'))
+        plt.close('all') 
+        return chart_path
+    except Exception as e:
+        return f"❌ Chart Exception: {str(e)}"
+
+def generate_final_chart(pair, ai_text, current_price):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6:
         symbol = symbol[:3] + "/" + symbol[3:]
@@ -108,7 +137,6 @@ def generate_chart(pair, ai_text, current_price):
         df = df.astype(float).sort_index()
 
         entry_val = sl_val = tp_val = alert_val = None
-        
         entry_match = re.search(r"Entry[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         sl_match = re.search(r"SL[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
         tp_match = re.search(r"TP[:\s*]*([\d\.]+)", ai_text, re.IGNORECASE)
@@ -119,27 +147,11 @@ def generate_chart(pair, ai_text, current_price):
         if tp_match: tp_val = float(tp_match.group(1))
         if alert_match: alert_val = float(alert_match.group(1))
 
-        # FIX: mplfinance hlines ko dictionary format mein accept karta hai
-        hline_vals = []
-        hline_colors = []
-        hline_styles = []
-
-        if entry_val: 
-            hline_vals.append(entry_val)
-            hline_colors.append('b')
-            hline_styles.append('-')
-        if sl_val: 
-            hline_vals.append(sl_val)
-            hline_colors.append('r')
-            hline_styles.append('--')
-        if tp_val: 
-            hline_vals.append(tp_val)
-            hline_colors.append('g')
-            hline_styles.append('--')
-        if alert_val: 
-            hline_vals.append(alert_val)
-            hline_colors.append('y')
-            hline_styles.append('-')
+        hline_vals, hline_colors, hline_styles = [], [], []
+        if entry_val: hline_vals.append(entry_val); hline_colors.append('b'); hline_styles.append('-')
+        if sl_val: hline_vals.append(sl_val); hline_colors.append('r'); hline_styles.append('--')
+        if tp_val: hline_vals.append(tp_val); hline_colors.append('g'); hline_styles.append('--')
+        if alert_val: hline_vals.append(alert_val); hline_colors.append('y'); hline_styles.append('-')
 
         chart_path = f"/tmp/{symbol.replace('/', '')}_chart.jpg"
         title = f"{symbol} - 5M"
@@ -147,28 +159,23 @@ def generate_chart(pair, ai_text, current_price):
         plot_kwargs = dict(type='candle', style='charles', title=title, ylabel='Price', 
                            savefig=dict(fname=chart_path, bbox_inches='tight'))
         
-        # Agar lines majood hain to unko dict ke through bhejo
         if hline_vals:
-            plot_kwargs['hlines'] = dict(
-                hlines=hline_vals,
-                colors=hline_colors,
-                linestyle=hline_styles,
-                linewidths=1.5
-            )
+            plot_kwargs['hlines'] = dict(hlines=hline_vals, colors=hline_colors, linestyle=hline_styles, linewidths=1.5)
 
         mpf.plot(df, **plot_kwargs)
-        
         plt.close('all') 
         return chart_path
     except Exception as e:
         return f"❌ Chart Exception: {str(e)}"
 
-def get_ai_analysis(pair, live_data, current_price):
-    url = "https://api.deepseek.com/chat/completions"
-    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-    
+def get_gemini_analysis(image_path, live_data, current_price, pair):
+    # Read image and encode to base64
+    with open(image_path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+
     prompt = f"""
     You are a strict SMC/ICT Forex Day Trading Bot.
+    Analyze the attached chart image along with the data provided.
     Pair: {pair}
     Current Price: {current_price}
     Live Data:\n{live_data}\n
@@ -192,12 +199,26 @@ def get_ai_analysis(pair, live_data, current_price):
     (If Status is NO TRADE):
     🎯 Alert Level: [Price]
     """
-    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0}
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": "image/jpeg", "data": encoded_string}}
+            ]
+        }],
+        "generationConfig": {"temperature": 0.0}
+    }
+
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=45).json()
-        return res['choices'][0]['message']['content'].strip()
+        res = requests.post(url, headers=headers, json=payload, timeout=60).json()
+        # Gemini response parsing
+        text = res['candidates'][0]['content']['parts'][0]['text'].strip()
+        return text
     except Exception as e:
-        return f"AI ERROR: {str(e)}"
+        return f"GEMINI ERROR: {str(e)} \n\nResponse: {res}"
 
 def get_live_data(pair):
     global data_cache
@@ -210,7 +231,6 @@ def get_live_data(pair):
     if symbol in data_cache:
         cached_time, cached_data, cached_price = data_cache[symbol]
         if now - cached_time < CACHE_EXPIRY:
-            print(f"Using Cached Data for {symbol}")
             return cached_data, cached_price
     
     timeframes = {"W": ("1week", 20), "D": ("1day", 20), "1H": ("1h", 60), "5M": ("5min", 60)}
@@ -293,25 +313,38 @@ def process_message(user_number, user_message):
             send_whatsapp_text(user_number, f"❌ TwelveData Error:\n{live_data}")
             return
             
-        analysis = get_ai_analysis(pair, live_data, current_price)
+        # Step 1: Generate Basic Chart for Gemini to look at
+        basic_chart_path = generate_basic_chart(pair)
+        if basic_chart_path.startswith("❌"):
+            send_whatsapp_text(user_number, "Chart generate nahi ho saka.")
+            return
+            
+        # Step 2: Send to Gemini Pro
+        analysis = get_gemini_analysis(basic_chart_path, live_data, current_price, pair)
+        os.remove(basic_chart_path)
         
-        chart_path = generate_chart(pair, analysis, current_price)
-        
-        if chart_path.startswith("❌"):
+        if analysis.startswith("GEMINI ERROR:"):
             send_whatsapp_text(user_number, analysis)
-            send_whatsapp_text(user_number, chart_path)
+            return
+            
+        # Step 3: Generate Final Chart with lines based on Gemini's analysis
+        final_chart_path = generate_final_chart(pair, analysis, current_price)
+        
+        if final_chart_path.startswith("❌"):
+            send_whatsapp_text(user_number, analysis)
+            send_whatsapp_text(user_number, final_chart_path)
         else:
-            status = send_whatsapp_image(user_number, chart_path, analysis)
+            status = send_whatsapp_image(user_number, final_chart_path, analysis)
             if status != "SUCCESS":
                 send_whatsapp_text(user_number, analysis)
                 send_whatsapp_text(user_number, status)
-            os.remove(chart_path) 
+            os.remove(final_chart_path) 
         
     except Exception as e:
         send_whatsapp_text(user_number, f"SYSTEM ERROR: {str(e)}")
 
 # ==========================================
-# ROUTES (WEBHOOK, PING & TRIGGER)
+# ROUTES
 # ==========================================
 @app.route('/ping', methods=['GET'])
 def ping():
@@ -325,10 +358,8 @@ def home():
 def trigger_analysis():
     data = request.json
     symbol = data.get('symbol', 'XAU/USD')
-    
     thread = threading.Thread(target=process_message, args=(MY_WHATSAPP_NUMBER, symbol))
     thread.start()
-    
     return jsonify({"status": "success", "message": "Analysis started"}), 200
 
 @app.route('/webhook', methods=['GET', 'POST'])
