@@ -4,4 +4,5 @@ pandas
 mplfinance
 matplotlib
 certifi>=2026.10.19
-smartmoneyconcepts
+
+smartmoneyconcepts @ git+https://github.com/joshyattridge/smart-money-concepts.git
