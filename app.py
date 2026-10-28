@@ -49,36 +49,39 @@ def is_duplicate(msg_id):
     return False
 
 # ==========================================
-# GITHUB RAG FUNCTIONS
+# GITHUB RAG & IMAGE FETCHING
 # ==========================================
-def fetch_course_rules():
+def fetch_course_materials():
     global course_cache
     if course_cache: return course_cache
 
-    print("Fetching Course Transcripts from GitHub...")
-    rules = {"macro": "", "structure": "", "entry": ""}
+    print("Fetching Breakout Strategy Materials from GitHub...")
     
-    for i in [1, 2]:
-        url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/course_video_{i}.txt"
-        try:
-            res = requests.get(url, timeout=10)
-            if res.status_code == 200: rules["macro"] += res.text + "\n\n"
-        except: pass
-
-    url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/course_video_3.txt"
+    # 1. Fetch Transcript Text
+    text_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/breakout_strategy.txt"
     try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200: rules["structure"] += res.text + "\n\n"
-    except: pass
+        res = requests.get(text_url, timeout=10)
+        rules_text = res.text if res.status_code == 200 else "No rules found."
+    except:
+        rules_text = "Error fetching rules."
 
-    for i in range(4, 11):
-        url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/course_video_{i}.txt"
+    # 2. Fetch Uploaded Screenshots (Exact names from your GitHub)
+    ss_names = [
+        "Screenshot_20261028-124622.jpg",
+        "Screenshot_20261028-124807.jpg"
+    ]
+    
+    ss_images = []
+    for name in ss_names:
+        url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/{name}"
         try:
             res = requests.get(url, timeout=10)
-            if res.status_code == 200: rules["entry"] += res.text + "\n\n"
-        except: pass
+            if res.status_code == 200:
+                ss_images.append(base64.b64encode(res.content).decode('utf-8'))
+        except:
+            pass
 
-    course_cache = rules
+    course_cache = {"rules": rules_text, "images": ss_images}
     return course_cache
 
 # ==========================================
@@ -109,17 +112,16 @@ def send_whatsapp_image(to, image_path, caption=""):
     except Exception as e: return f"❌ Image Send Exception: {str(e)}"
 
 # ==========================================
-# DATA FETCHING & PYTHON TREND CALCULATION
+# DATA FETCHING
 # ==========================================
 def fetch_market_data(pair):
     symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
     if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
     
-    timeframes = {"W": "1week", "D": "1day", "1H": "1h", "5M": "5min"}
+    timeframes = {"H4": "4h", "M15": "15min"}
     data_dict = {}
     live_text = ""
     current_price = 0
-    python_bias = "NEUTRAL"
     
     for tf_name, tf_code in timeframes.items():
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_code}&outputsize=50&apikey={TWELVEDATA_API_KEY}"
@@ -133,25 +135,17 @@ def fetch_market_data(pair):
                 df = df.astype(float).sort_index()
                 data_dict[tf_code] = df
                 
-                if tf_code == "5min": current_price = df['Close'].iloc[-1]
+                if tf_code == "15min": current_price = df['Close'].iloc[-1]
                 
-                # Python Trend Logic (EMA 50 on Daily)
-                if tf_code == "1day":
-                    df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-                    if current_price < df['EMA_50'].iloc[-1]:
-                        python_bias = "BEARISH"
-                    else:
-                        python_bias = "BULLISH"
-
                 live_text += f"--- {tf_name} ---\n"
-                for c in res['values'][:20]:
+                for c in res['values'][:15]:
                     live_text += f"O:{c['open']} H:{c['high']} L:{c['low']} C:{c['close']}\n"
             else:
-                return None, None, None, f"API_ERROR: {res.get('message', str(res))}"
+                return None, None, f"API_ERROR: {res.get('message', str(res))}"
         except Exception as e:
-            return None, None, None, f"API_ERROR: {str(e)}"
+            return None, None, f"API_ERROR: {str(e)}"
             
-    return data_dict, current_price, python_bias, live_text
+    return data_dict, current_price, live_text
 
 # ==========================================
 # CHART FUNCTIONS
@@ -171,12 +165,9 @@ def generate_final_chart_from_df(df, pair, ai_data):
     sl_val = float(ai_data['sl']) if ai_data.get('sl') else None
     tp_val = float(ai_data['tp']) if ai_data.get('tp') else None
     alert_val = float(ai_data['alert_level']) if ai_data.get('alert_level') else None
-    zone_top = float(ai_data['zone_top']) if ai_data.get('zone_top') else None
-    zone_bottom = float(ai_data['zone_bottom']) if ai_data.get('zone_bottom') else None
-    zone_name = str(ai_data['zone_name']).upper() if ai_data.get('zone_name') else "POI"
 
     chart_path = f"/tmp/{symbol.replace('/', '')}_final.jpg"
-    title = f"{symbol} - 5M Entry Chart"
+    title = f"{symbol} - M15 Entry Chart"
     
     fig, axlist = mpf.plot(df, type='candle', style='charles', title=title, ylabel='Price', returnfig=True)
     ax = axlist[0]
@@ -184,21 +175,7 @@ def generate_final_chart_from_df(df, pair, ai_data):
     if entry_val: ax.axhline(entry_val, color='b', linestyle='-', linewidth=1.5, label='Entry')
     if sl_val: ax.axhline(sl_val, color='r', linestyle='--', linewidth=1.5, label='SL')
     if tp_val: ax.axhline(tp_val, color='g', linestyle='--', linewidth=1.5, label='TP')
-
-    if zone_top and zone_bottom:
-        ax.axhspan(zone_bottom, zone_top, color='yellow', alpha=0.3)
-        ax.axhline(zone_top, color='orange', linestyle='-', linewidth=1)
-        ax.axhline(zone_bottom, color='orange', linestyle='-', linewidth=1)
-        
-        y_center = (zone_top + zone_bottom) / 2
-        x_pos = len(df) - 2
-        
-        ax.text(x_pos, y_center, f" {zone_name} ", fontsize=12, color='black', fontweight='bold', 
-                bbox=dict(facecolor='yellow', alpha=0.8, edgecolor='orange', boxstyle='round,pad=0.3'),
-                verticalalignment='center', horizontalalignment='right')
-        
-    elif alert_val:
-        ax.axhline(alert_val, color='y', linestyle='-', linewidth=2.0, label='Alert Level')
+    if alert_val: ax.axhline(alert_val, color='y', linestyle='-', linewidth=2.0, label='Alert')
 
     fig.savefig(chart_path, bbox_inches='tight')
     plt.close(fig) 
@@ -222,59 +199,37 @@ def get_available_gemini_models():
     if not valid_models: valid_models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
     return valid_models
 
-def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, python_bias, live_data):
-    rules = fetch_course_rules()
-    
-    with open(weekly, "rb") as f: encoded_weekly = base64.b64encode(f.read()).decode('utf-8')
-    with open(daily, "rb") as f: encoded_daily = base64.b64encode(f.read()).decode('utf-8')
-    with open(h1, "rb") as f: encoded_h1 = base64.b64encode(f.read()).decode('utf-8')
-    with open(m5, "rb") as f: encoded_m5 = base64.b64encode(f.read()).decode('utf-8')
+def get_gemini_analysis(materials, chart_h4_path, chart_m15_path, current_price, pair, live_data):
+    with open(chart_h4_path, "rb") as f: encoded_h4 = base64.b64encode(f.read()).decode('utf-8')
+    with open(chart_m15_path, "rb") as f: encoded_m15 = base64.b64encode(f.read()).decode('utf-8')
 
     prompt = f"""
-    You are an expert SMC/ICT Forex Trader. Analyze the provided charts for {pair} (Current Price: {current_price}).
+    You are an expert Breakout Trader. Analyze the live charts for {pair} (Current Price: {current_price}).
     
-    IMAGE ORDER:
-    - Image 1: WEEKLY Chart
-    - Image 2: DAILY Chart
-    - Image 3: 1H Chart
-    - Image 4: 5M Chart
+    --- YOUR REFERENCE MATERIALS ---
+    1. TEXT RULES: \n{materials['rules']}\n
+    2. UPLOADED IMAGES: These are your course's Screenshots showing how to mark levels and take breakout entries.
     
-    --- CRITICAL INSTRUCTION ---
-    The Python system has mathematically calculated the Daily Trend (EMA 50) and confirmed it is: {python_bias}.
-    YOU MUST AGREE WITH THIS MACRO BIAS.
+    --- LIVE CHARTS TO ANALYZE ---
+    - Live H4 Chart (Look for Structure/Minor Levels)
+    - Live M15 Chart (Look for Breakout Entry)
     
-    If the Bias is BEARISH, you MUST look for SELL setups only. Do NOT look for buys.
-    If the Bias is BULLISH, you MUST look for BUY setups only. Do NOT look for sells.
-    
-    --- COURSE RULES (FOLLOW THESE STRICTLY) ---
-    [MACRO BIAS RULES]
-    {rules['macro']}
-    
-    [1H STRUCTURE RULES]
-    {rules['structure']}
-    
-    [ENTRY RULES]
-    {rules['entry']}
-    ---------------------------------------------
     Additional Data: \n{live_data}\n
 
+    Follow the exact visual method shown in the uploaded Screenshots. If the live chart looks like the course examples, give an ENTRY. Otherwise, NO TRADE.
     IMPORTANT: If Status is ENTRY, calculate TP based on EXACTLY 1:3 Risk Reward.
     
     You MUST respond with a valid JSON object ONLY. Do not include markdown formatting or backticks.
     The JSON must have exactly these keys:
     {{
       "report": "1 short line about market movement",
-      "trend": "{python_bias}",
-      "h1": "1H Trend",
+      "trend": "Bullish or Bearish",
       "status": "ENTRY or NO TRADE",
-      "reason": "1 short SMC reason in Roman Urdu",
+      "reason": "1 short reason in Roman Urdu matching the course logic",
       "entry": "Price or null",
       "sl": "Price or null",
       "tp": "Price or null",
-      "alert_level": "Price or null",
-      "zone_top": "Price or null",
-      "zone_bottom": "Price or null",
-      "zone_name": "FVG or OB or null"
+      "alert_level": "Price or null"
     }}
     """
 
@@ -283,16 +238,19 @@ def get_gemini_analysis(weekly, daily, h1, m5, current_price, pair, python_bias,
     for model_name in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         headers = {'Content-Type': 'application/json'}
+        
+        # Prepare parts (Prompt + H4 + M15 + Uploaded SS)
+        parts = [
+            {"text": prompt},
+            {"inline_data": {"mime_type": "image/jpeg", "data": encoded_h4}},
+            {"inline_data": {"mime_type": "image/jpeg", "data": encoded_m15}}
+        ]
+        
+        for img in materials['images']:
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img}})
+
         payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_weekly}},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_daily}},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_h1}},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": encoded_m5}}
-                ]
-            }],
+            "contents": [{"parts": parts}],
             "generationConfig": {"temperature": 0.0, "response_mime_type": "application/json"}
         }
 
@@ -317,11 +275,11 @@ def process_message(user_number, user_message):
     try:
         msg_upper = user_message.upper().strip()
         
-        if "CLEAR" in msg_upper or "DELETE" in msg_upper or "RESET" in msg_upper or "REMOVE" in msg_upper:
+        if "CLEAR" in msg_upper or "DELETE" in msg_upper or "RESET" in msg_upper:
             try:
                 response = requests.post(ORACLE_CLEAR_URL, timeout=10)
                 if response.status_code == 200: send_whatsapp_text(user_number, "✅ Saare purane alerts delete ho gaye hain!")
-                else: send_whatsapp_text(user_number, "❌ Oracle Error: Alerts delete nahi ho sake.")
+                else: send_whatsapp_text(user_number, "❌ Oracle Error.")
             except Exception as e: send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
             return
 
@@ -340,7 +298,7 @@ def process_message(user_number, user_message):
                         oracle_payload = {"symbol": pair, "price": price_level}
                         response = requests.post(ORACLE_API_URL, json=oracle_payload, timeout=10)
                         if response.status_code == 200: send_whatsapp_text(user_number, f"✅ Alert sent to Oracle for {pair} at {price_level}!")
-                        else: send_whatsapp_text(user_number, f"❌ Oracle Error for {price_level}.")
+                        else: send_whatsapp_text(user_number, f"❌ Oracle Error.")
                     except Exception as e: send_whatsapp_text(user_number, f"❌ Oracle Connection Failed.")
                 return
             else:
@@ -348,7 +306,7 @@ def process_message(user_number, user_message):
 
         greetings = ["HELLO", "HI", "HEY", "SALAM", "ASSALAM", "AO", "START", "BOSS"]
         if msg_upper in greetings:
-            send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main RAG-based 4-Chart analysis shuru karoon. 😎")
+            send_whatsapp_text(user_number, "Boss, main bilkul ready hoon! 🚀\nAap mujhe koi bhi pair likh kar bhejien (jaise: XAUUSD, EURUSD, GOLD) taake main course SS aur rules ke sath analysis shuru karoon. 😎")
             return
 
         valid_keywords = ["XAU", "GOLD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "BTC"]
@@ -358,28 +316,25 @@ def process_message(user_number, user_message):
         pair = "XAU/USD" if "GOLD" in msg_upper or "XAU" in msg_upper else msg_upper
         send_whatsapp_text(user_number, "⏳ Analysis aur Chart ban raha hai, please wait...")
         
-        # Yahan Python Trend Calculate kar raha hai
-        data_dict, current_price, python_bias, live_data = fetch_market_data(pair)
+        materials = fetch_course_materials()
+        data_dict, current_price, live_data = fetch_market_data(pair)
+        
         if not data_dict:
             send_whatsapp_text(user_number, f"❌ Data Error for {pair}: {live_data}"); return
             
         symbol = pair.upper().replace("GOLD", "XAU/USD").replace("XAUUSD", "XAU/USD")
         if "/" not in symbol and len(symbol) == 6: symbol = symbol[:3] + "/" + symbol[3:]
         
-        chart_w = create_chart_from_df(data_dict["1week"], symbol, "1week")
-        chart_d = create_chart_from_df(data_dict["1day"], symbol, "1day")
-        chart_1h = create_chart_from_df(data_dict["1h"], symbol, "1h")
-        chart_5m = create_chart_from_df(data_dict["5min"], symbol, "5m")
+        chart_h4 = create_chart_from_df(data_dict["4h"], symbol, "4h")
+        chart_m15 = create_chart_from_df(data_dict["15min"], symbol, "15min")
         
-        # AI ko Python ka nikal hua trend de rahe hain
-        ai_data = get_gemini_analysis(chart_w, chart_d, chart_1h, chart_5m, current_price, pair, python_bias, live_data)
+        ai_data = get_gemini_analysis(materials, chart_h4, chart_m15, current_price, pair, live_data)
         
-        for c in [chart_w, chart_d, chart_1h, chart_5m]: os.remove(c)
+        for c in [chart_h4, chart_m15]: os.remove(c)
         
         if not ai_data:
             send_whatsapp_text(user_number, "❌ AI busy hai ya course text parse nahi hua. Thori dair baad try karein."); return
 
-        # Strict RR Validation (Python side)
         if ai_data.get('status') == 'ENTRY':
             try:
                 e_val = float(ai_data['entry']); s_val = float(ai_data['sl']); t_val = float(ai_data['tp'])
@@ -390,17 +345,16 @@ def process_message(user_number, user_message):
                     ai_data['alert_level'] = ai_data['entry']
             except: pass
             
-        final_chart_path = generate_final_chart_from_df(data_dict["5min"], pair, ai_data)
+        final_chart_path = generate_final_chart_from_df(data_dict["15min"], pair, ai_data)
         
         message = f"🪙 {pair}\n📍 Current: {current_price}\n📝 Report: {ai_data.get('report', 'N/A')}\n"
-        message += f"📈 Macro Trend: {ai_data.get('trend', 'N/A')}\n📊 1H: {ai_data.get('h1', 'N/A')}\n"
+        message += f"📈 Trend: {ai_data.get('trend', 'N/A')}\n"
         
         if ai_data.get('status') == 'ENTRY':
             message += f"✅ Status: ENTRY\n💡 Reason: {ai_data.get('reason', 'N/A')}\n"
             message += f"🎯 Entry: {ai_data.get('entry')}\n🛑 SL: {ai_data.get('sl')}\n💰 TP: {ai_data.get('tp')}\n⚖️ RR: 1:3\n"
         else:
             message += f"🚫 Status: NO TRADE\n💡 Reason: {ai_data.get('reason', 'N/A')}\n🎯 Alert Level: {ai_data.get('alert_level')}\n"
-            if ai_data.get('zone_name'): message += f"📦 Zone: {ai_data.get('zone_name')} ({ai_data.get('zone_bottom')} - {ai_data.get('zone_top')})\n"
 
         status = send_whatsapp_image(user_number, final_chart_path, f"📊 {pair} Entry Chart")
         if status != "SUCCESS": send_whatsapp_text(user_number, status)
