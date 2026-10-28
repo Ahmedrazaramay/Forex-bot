@@ -1,0 +1,396 @@
+{
+  "master_course_rules": {
+    "version": "1.0",
+    "total_lectures": 10,
+    "source": "SMC/ICT Course (Urdu/Hindi)",
+    "strict_mode": true,
+    "no_extra_rules": true,
+
+    "core_philosophy": {
+      "price_movement": "Price hamesha POI aur Liquidity ke darmiyan move karti hai. POI par ho to Liquidity dhoondti hai, Liquidity par ho to POI dhoondti hai.",
+      "ki_levels": "POI + Liquidity = KI Levels (Key Levels)",
+      "nearest_rule": "Nearest liquidity ko price pehle hunt karti hai (chor-police analogy)",
+      "big_players": "Big players retail ka SL hunt karke apne orders fill karte hain, phir strong move dete hain"
+    },
+
+    "bias": {
+      "rule": "Bias sirf Higher Time Frame (Monthly → Weekly → Daily) se find karo",
+      "detail": "Monthly se start, phir Weekly, phir Daily. Teeno ka direction dekh kar final bias decide karo. Lower TF (4H, 1H, 30M, 15M) par bias find nahi karna.",
+      "conflict_rule": "Conflict ho to bada TF jeete (Monthly > Weekly > Daily)",
+      "monthly_open_rule": "Monthly chart at least 2 weeks ya har month ek baar zaroor open karo",
+      "entry_timeframe": "1H ya usse upar (author ki advice)"
+    },
+
+    "four_movement_conditions": {
+      "condition_1": {
+        "name": "POI → Liquidity",
+        "also_called": "Main Bias / Trend",
+        "trade_allowed": true,
+        "detail": "Price POI se nikalti hai aur Liquidity hunt karti hai. Highest win probability."
+      },
+      "condition_2": {
+        "name": "Liquidity → POI",
+        "also_called": "Reversal Bias / Counter-trade",
+        "trade_allowed": false,
+        "detail": "Risky hai. Beginner avoid kare."
+      },
+      "condition_3": {
+        "name": "POI → POI",
+        "also_called": "Range Play (Badi Range)",
+        "trade_allowed": false
+      },
+      "condition_4": {
+        "name": "Liquidity → Liquidity",
+        "also_called": "Range Play (Chhoti Range)",
+        "trade_allowed": false
+      },
+      "summary": "Sirf Condition 1 (POI → Liquidity) trade karo."
+    },
+
+    "poi_types": {
+      "total": 7,
+      "types": ["Order Block (OB)", "Imbalance", "FVG", "Rejection Block (RB)", "Reclaimed Order Block", "Mitigation Block", "Breaker Block"],
+      "priority": "OB > Imbalance > FVG",
+      "rule": "POI mark karna zaroori hai price ke aas-paas. POI aur Liquidity dono ko equal importance do."
+    },
+
+    "liquidity": {
+      "definition": "Liquidity = Retail traders ke Stop Losses (SL)",
+      "why_needed": "TP find karna, reversal trades lena, trapping se bachna, entry lena",
+      "types_12": {
+        "type_1_support_resistance": {
+          "support": "Support ke NEECHE",
+          "resistance": "Resistance ke UPAR"
+        },
+        "type_2_trendline": {
+          "rising": "Trendline ke NEECHE",
+          "falling": "Trendline ke UPAR"
+        },
+        "type_3_chart_pattern": {
+          "rule": "Bias ki direction mein patterns WORK, bias ke against = TRAP"
+        },
+        "type_4_breakout_breakdown": {
+          "breakout": "Breakout point ke UPAR",
+          "breakdown": "Breakdown point ke NEECHE"
+        },
+        "type_5_consolidation": {
+          "rule": "Zone ke UPAR aur NEECHE dono side"
+        },
+        "type_6_swing_high_low": {
+          "swing_high": "Swing High ke UPAR",
+          "swing_low": "Swing Low ke NEECHE"
+        },
+        "type_7_lrl_hrl": {
+          "lrl": "Low Resistance Liquidity — bina POI, price FAST move",
+          "hrl": "High Resistance Liquidity — POI ke saath, price SLOW/consolidate",
+          "liquidity_void": "Middle FVGs = LRL, first+last FVG = HRL"
+        },
+        "type_8_external_internal": {
+          "external": "HH ke UPAR / HL ke NEECHE",
+          "internal": "Leg ke andar (small swings, FVG, OB)",
+          "cycle": "External → Internal → External → Internal..."
+        },
+        "type_9_candles": {
+          "rule": "Daily/Weekly/Monthly high/low (sirf Daily+ TF)"
+        },
+        "type_10_sessions": {
+          "rule": "Asian/London/NY/LC high/low"
+        },
+        "type_11_equal_high_low": {
+          "rule": "Same as Support/Resistance"
+        },
+        "type_12_bsl_ssl": {
+          "bsl": "Swing High ke UPAR",
+          "ssl": "Swing Low ke NEECHE",
+          "rule": "Same as Swing High/Low (renamed)"
+        }
+      },
+      "sweep_vs_run": {
+        "sweep": "Liquidity + close back inside → Reversal",
+        "run": "Liquidity + close beyond → Continuation"
+      }
+    },
+
+    "structure_mapping": {
+      "trends": {
+        "uptrend": "HH + HL",
+        "downtrend": "LH + LL",
+        "sideways": "HH/LL break hota hai par wapas aa jata hai → NO TRADE"
+      },
+      "impulsive_vs_pullback": {
+        "impulsive": "Trend direction mein move (capture karo)",
+        "pullback": "Trend ke against move (ignore karo)"
+      },
+      "external_vs_internal": {
+        "external": "Main overall structure (HH/HL ya LH/LL) — bias determine karta hai",
+        "internal": "External ke andar chhote swings — HH/HL count nahi hote"
+      },
+      "idm": {
+        "definition": "Inducement = fake CHoCH (trap)",
+        "formation": {
+          "uptrend": "High ke LEFT side wala swing break",
+          "downtrend": "Low ke LEFT side wala swing break"
+        },
+        "body_close": "Zaroori nahi — sweep bhi valid",
+        "rule": "IDM ke baad hi HH/LL confirm hota hai"
+      },
+      "bos": {
+        "definition": "Break of Structure = continuation",
+        "formation": {
+          "uptrend": "HH ke upar body close",
+          "downtrend": "LL ke neeche body close"
+        },
+        "body_close": "Zaroori"
+      },
+      "choch": {
+        "definition": "Change of Character = reversal",
+        "formation": {
+          "uptrend": "HL ke neeche body close",
+          "downtrend": "LH ke upar body close"
+        },
+        "body_close": "Zaroori"
+      },
+      "sequence": "IDM → HH/LL → BOS → HL/LH → repeat",
+      "start_point": "Uptrend = lowest se start, Downtrend = highest se start"
+    },
+
+    "gaps": {
+      "fvg": {
+        "definition": "Fair Value Gap — 3-candle gap",
+        "bullish": "C1.high < C3.low",
+        "bearish": "C1.low > C3.high",
+        "multiple_rule": "First ya last FVG use karo, beech wale skip",
+        "power_rule": "FVG size ≠ power — chhota bada barabar"
+      },
+      "bpr": {
+        "definition": "Balanced Price Range — 2 opposing FVGs ka overlap",
+        "power": "FVG se zyada strong"
+      },
+      "volume_imbalance": {
+        "definition": "Body-to-body gap (2 candles)",
+        "tf_rule": "Sirf Daily+ par",
+        "power": "FVG se zyada strong"
+      },
+      "gap_imbalance": {
+        "definition": "Wick-to-wick gap",
+        "market_rule": "Mostly Indian market, forex mein ignore"
+      },
+      "breakaway_gap": {
+        "definition": "FVG ka unfilled portion after partial fill",
+        "behavior": "Chart-specific (gold=no fill, bitcoin=fill, forex=fill)"
+      },
+      "bias_rule": "Bias ke against gaps = trap, skip"
+    },
+
+    "order_block": {
+      "definition": {
+        "bullish": "Bullish move ki LAST SELLING CANDLE (sabse zyada low lagaya)",
+        "bearish": "Bearish move ki LAST BUYING CANDLE (sabse zyada high lagaya)"
+      },
+      "color_rule": "Color matter nahi — extreme high/low dekho",
+      "validity": {
+        "rule": "OB tabhi valid hai jab uske saath FVG ho",
+        "cases": [
+          "OB candle + FVG same candle = valid",
+          "OB candle, no FVG, next candle FVG = valid (next candle OB)",
+          "OB candle, no FVG, no next candle FVG = invalid"
+        ]
+      },
+      "location": {
+        "buy": "Discount zone (0-0.5 fib)",
+        "sell": "Premium zone (0.5-1 fib)",
+        "swing_extension": "Agar price zone mein na aaye aur naya extreme bana de → swing extend karo, phir re-mark karo"
+      },
+      "strongest": {
+        "rank_1": "OB after Liquidity Sweep",
+        "rank_2": "OB after IDM (first)"
+      },
+      "multiple_rule": "First (after IDM) ya last (extreme) use karo — beech wale skip",
+      "ob_fvg_combined": "OB + FVG = combined zone (entry poore zone par)"
+    },
+
+    "mitigation_breaker": {
+      "mitigation": {
+        "bullish": "Pullback se pehle wale swing HIGH ki extreme HIGH candle (market ne high ke upar body close kiya ho)",
+        "bearish": "Pullback se pehle wale swing LOW ki extreme LOW candle (market ne low ke neeche body close kiya ho)",
+        "purpose": "Trend continuation",
+        "strong": "FVG ke saath overlap",
+        "weak": "FVG overlap nahi",
+        "refinement": {
+          "bullish": "Upper wick only (agar FVG se overlap ho)",
+          "bearish": "Lower wick only (agar FVG se overlap ho)"
+        }
+      },
+      "breaker": {
+        "bullish": "Pehle low sweep + phir high break (body close) → extreme high candle",
+        "bearish": "Pehle high sweep + phir low break (body close) → extreme low candle",
+        "purpose": "Trend reversal",
+        "power": "Mitigation se zyada strong (dono side sweep)"
+      },
+      "tgl": {
+        "tgl_1": "Mitigation Block",
+        "tgl_2": "FVG + Order Block",
+        "breaker": "Breaker Block (reversal level)",
+        "rule": "Sab ka kaam ek hi hai — trend join/continue karwana"
+      },
+      "level_fail": "Koi bhi level tab fail hota hai jab us ke andar candle body close kare — sirf wick se nahi"
+    },
+
+    "three_candle_swing": {
+      "rule": "Process matter karta hai, candle count nahi",
+      "steps": [
+        "Candle 1: POI tap",
+        "Candle 2: Displacement (FVG/OB creation ke saath strong move)",
+        "Candle 3: Last POI of displacement leg retest",
+        "Candle 4: Expansion (nearest liquidity tak)"
+      ],
+      "rule_additional": "2 candles mein bhi ho sakta hai, 10 mein bhi. Process sequence matter karta hai."
+    },
+
+    "displacement": {
+      "definition": "Price ka fast, strong move jismein FVG ya OB bane",
+      "why": "Big players ke bade orders se price fast move karti hai",
+      "how_to_identify": "POI tap ke baad achanak fast move + FVG/OB creation",
+      "if_not": "Agar price slow/sideways rahe, koi FVG/OB na bane → displacement nahi hui → trade nahi",
+      "bot_logic": "IF candle creates FVG/OB in direction → displacement = TRUE"
+    },
+
+    "mss": {
+      "definition": "Market Structure Shift = last swing high/low ka break",
+      "htf": "Body close zaroori",
+      "ltf": "Sweep bhi valid (close zaroori nahi)",
+      "bullish": "Last lower-high ke upar",
+      "bearish": "Last higher-low ke neeche"
+    },
+
+    "entry_module": {
+      "two_timeframes": {
+        "htf": "Structure Mapping + POI + Liquidity + Bias",
+        "ltf": "Entry confirmation + Execution"
+      },
+      "pairing": {
+        "weekly": "4H ya 1H",
+        "daily": "1H",
+        "4h": "15M",
+        "1h": "5M",
+        "15m": "1M (avoid)"
+      },
+      "ideal_sequence": [
+        "1. HTF POI identify (with FVG)",
+        "2. Price HTF POI tap",
+        "3. LTF par jao",
+        "4. LTF MSS confirm",
+        "5. MSS displacement ke saath (FVG/OB bane)",
+        "6. LTF last POI retest",
+        "7. Entry lo",
+        "8. SL = LTF POI ± buffer",
+        "9. TP = HTF nearest liquidity"
+      ],
+      "four_scenarios": {
+        "ideal": "MSS + displacement + retest",
+        "mss_far": "Displacement retest (MSS wait nahi)",
+        "consolidation": "Hold position (HTF bias clear)",
+        "safe": "BOS retest after MSS (extra confirmation)"
+      },
+      "three_tf_approach": "Daily POI → 1H structure → 5M refined entry",
+      "lrl_left_side": "Aggressive entry (displacement only, no MSS wait)",
+      "close_rules": {
+        "htf_bos_choch": "Body close required",
+        "ltf_mss": "Sweep bhi valid",
+        "ltf_bos": "Body close required"
+      },
+      "structure_mapping_vs_entry": "HTF structure ≠ LTF entry structure (donon alag)"
+    },
+
+    "risk_management": {
+      "sl_rule": "SL = Entry POI ke neeche (buy) / upar (sell) + buffer",
+      "tp_rule": "TP = Nearest liquidity (bias direction)",
+      "rr_rule": "Sirf 1:3 RR wali entry (author ka original rule nahi — user decision)",
+      "breakeven": "1:1 ya 1:2 par",
+      "partial": "1:1 par 50% book",
+      "weekly_trades": "Max 1-3 trades per week",
+      "backtest": "Har pair par strategy test karo"
+    },
+
+    "session_strategy": {
+      "killzones": {
+        "asian": "3:30 PM – 8:00 PM (NY time)",
+        "london": "Mentioned, specific time nahi",
+        "ny": "Mentioned, best for entries"
+      },
+      "asian_strategy": [
+        "Pehla valid POI (jo tap na hua ho) mark karo",
+        "Agar valid POI na ho → high/low liquidity mark karo",
+        "Bias dekhna zaroori nahi (Asian mein)",
+        "POI tap + rejection → entry",
+        "Target jaldi lena (1:3)",
+        "London/NY mein entry tab lo jab: pehle session ki liquidity sweep + MSS + last POI tap"
+      ],
+      "timezone": "UTC-4 (New York) chart aur killzone indicators par set karo"
+    },
+
+    "ote": {
+      "definition": "Optimal Trade Entry — swing low se swing high par 0.5-0.6 fib level",
+      "use": "Reversal trades ke liye entry tool (indicator nahi)",
+      "tp": "OTE ke -1 level tak"
+    },
+
+    "mirror_concept": {
+      "rule": "Trend-side POIs (FVG/OB/Mitigation) pullback ke raste mein mirror ka kaam karte hain — price ko wapas trend direction mein dhakelte hain",
+      "detail": "Agar pullback ke raste mein trend-side POI ho → wapas trend mein aayegi. Agar clean range ho → price next liquidity tak ja sakti hai (danger)."
+    },
+
+    "idm": {
+      "definition": "Inducement = fake CHoCH (trap)",
+      "rule": "IDM ke baad hi HH/LL confirm hota hai",
+      "sweep_rule": "Body close zaroori nahi, sweep bhi valid",
+      "vs_mss": "IDM = fake break (trap), MSS = valid structure break"
+    },
+
+    "do_rules": [
+      "Bias Monthly → Weekly → Daily se",
+      "POI + Liquidity dono mark karo",
+      "Sirf Main Bias (POI → Liquidity) trade karo",
+      "Nearest liquidity pehle hunt hoti hai",
+      "Entry sirf 3-candle swing confirm hone par LTF par",
+      "Displacement ke baad hi entry lo",
+      "TP = nearest liquidity",
+      "Bias ke against trade mat lo",
+      "Sideways mein trade mat lo",
+      "Pair behavior analyze karo",
+      "Backtest zaroori hai"
+    ],
+
+    "dont_rules": [
+      "Bias ke against trade",
+      "Sideways/consolidation mein trade",
+      "LTF par structure mapping",
+      "1M/15M pair",
+      "Color dekh kar OB chunna",
+      "Bina displacement ke entry",
+      "Reversal bias (beginner)",
+      "Beech wale FVGs/OBs use karna",
+      "Bias ke against gaps/patterns/breakouts (trap)",
+      "3+ trades per week"
+    ],
+
+    "bot_quick_rules": [
+      "BIAS: Monthly → Weekly → Daily (conflict → bada TF)",
+      "SIRF: Main Bias (POI → Liquidity)",
+      "POI priority: Breaker > OB+Sweep > OB+IDM > Strong Mitigation > Volume Imb > BPR > FVG",
+      "OB valid = FVG ke saath",
+      "Buy = Discount (0-0.5), Sell = Premium (0.5-1)",
+      "ENTRY: HTF POI tap → LTF MSS → LTF displacement → LTF last POI retest",
+      "MSS = last swing break (LTF par sweep bhi OK)",
+      "Displacement = FVG + OB creation ke saath fast move",
+      "SL = LTF POI ± buffer. TP = HTF nearest liquidity",
+      "RR: 1:3 only (user decision)",
+      "3-candle swing = process (tap→displacement→retest→expansion), not candle count",
+      "Structure Mapping (HTF) ≠ Entry Structure (LTF)",
+      "Sweep = reversal, Run = continuation",
+      "Bias ke against = TRAP (skip)",
+      "Sideways = NO TRADE",
+      "Max 1-3 trades/week. Breakeven 1:1/1:2. Partial 50% at 1:1"
+    ]
+  }
+}
