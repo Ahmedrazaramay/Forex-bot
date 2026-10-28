@@ -14,9 +14,6 @@ import json
 from datetime import datetime
 import queue
 
-# Smart Money Concepts Library
-from smartmoneyconcepts import smc
-
 app = Flask(__name__)
 
 # ==========================================
@@ -127,35 +124,6 @@ def fetch_market_data(pair):
     return data_dict, current_price, "OK"
 
 # ==========================================
-# LAYER 1: SMC MATH BY PYTHON
-# ==========================================
-def calculate_smc_data(df):
-    try:
-        smc_data = smc.swing_highs_lows(df, swing_length=5)
-        bos_choch = smc.bos_choch(df, smc_data)
-        ob = smc.ob(df, smc_data, bos_choch)
-        fvg = smc.fvg(df)
-        
-        latest_bos = "None"
-        if not bos_choch['BOS'].dropna().empty:
-            idx = bos_choch['BOS'].dropna().index[-1]
-            latest_bos = f"BOS {bos_choch['BOS'].loc[idx]} at {df['Close'].loc[idx]:.2f}"
-            
-        latest_ob = "None"
-        if not ob['OB'].dropna().empty:
-            idx = ob['OB'].dropna().index[-1]
-            latest_ob = f"OB {ob['OB'].loc[idx]} Top:{ob['Top'].loc[idx]:.2f} Bottom:{ob['Bottom'].loc[idx]:.2f}"
-
-        latest_fvg = "None"
-        if not fvg['FVG'].dropna().empty:
-            idx = fvg['FVG'].dropna().index[-1]
-            latest_fvg = f"FVG Top:{fvg['Top'].loc[idx]:.2f} Bottom:{fvg['Bottom'].loc[idx]:.2f}"
-            
-        return {"BOS": latest_bos, "OB": latest_ob, "FVG": latest_fvg}
-    except:
-        return {"BOS": "Error", "OB": "Error", "FVG": "Error"}
-
-# ==========================================
 # CHART GENERATION
 # ==========================================
 def create_chart(df, symbol, timeframe):
@@ -177,7 +145,7 @@ def generate_final_chart(df, pair, entry, sl, tp):
     return chart_path
 
 # ==========================================
-# AI JUDGE (PURE COURSE RULES)
+# AI ANALYSIS (PURE COURSE RULES)
 # ==========================================
 def get_available_gemini_models():
     valid_models = []
@@ -194,7 +162,7 @@ def get_available_gemini_models():
     if not valid_models: valid_models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
     return valid_models
 
-def get_ai_analysis(chart_paths, smc_math, rules_json, pair):
+def get_ai_analysis(chart_paths, rules_json, pair):
     encoded_charts = []
     for path in chart_paths:
         with open(path, "rb") as f:
@@ -203,27 +171,20 @@ def get_ai_analysis(chart_paths, smc_math, rules_json, pair):
     prompt = f"""
     You are an expert Forex Trader. Analyze the live charts for {pair}.
     
-    PYTHON SMC MATH (Layer 1):
-    {json.dumps(smc_math, indent=2)}
-    
-    COURSE RULES:
+    YOUR ONLY REFERENCE IS THIS COURSE JSON:
     {rules_json}
     
     LIVE CHARTS (In Order: Weekly, Daily, H4, H1, M15, M5):
+    Analyze them top-down strictly based on the JSON rules.
     
-    Based on Python Math and the Course Rules, determine:
-    1. What is the Bias? (W/D)
-    2. Is there a valid POI on H4 or H1?
-    3. Is there a valid entry on M15 (if H4 POI) or M5 (if H1 POI)?
-    
-    If valid setup, calculate Entry, SL, TP exactly as Course Rules dictate.
+    Calculate Entry, SL, and TP exactly as the JSON rules dictate.
     
     You MUST respond in JSON:
     {{
       "report": "Short report in Roman Urdu",
-      "trend": "Bullish or Bearish",
+      "trend": "Bullish or Bearish or Ranging",
       "status": "ENTRY or NO TRADE",
-      "reason": "Short reason",
+      "reason": "Short reason based on JSON rules",
       "entry": "Price or null",
       "sl": "Price or null",
       "tp": "Price or null",
@@ -271,7 +232,7 @@ def process_message(user_number, user_message):
             
         if msg_upper in ["HELLO", "HI", "XAUUSD", "BTCUSD", "EURUSD"]:
             pair = "XAU/USD" if "XAU" in msg_upper or "GOLD" in msg_upper else msg_upper
-            send_whatsapp_text(user_number, f"⏳ 6 Timeframes ka data aa raha hai. Python math aur AI analysis chal raha hai...")
+            send_whatsapp_text(user_number, f"⏳ 6 Timeframes ka data aa raha hai. AI aapke Course JSON ke mutabiq analysis kar raha hai...")
             
             data_dict, current_price, err = fetch_market_data(pair)
             if not data_dict:
@@ -279,20 +240,16 @@ def process_message(user_number, user_message):
                 
             symbol = pair
             chart_paths = []
-            smc_math = {}
             tf_order = [("1week", "W"), ("1day", "D"), ("4h", "H4"), ("1h", "H1"), ("15min", "M15"), ("5min", "M5")]
             
             for tf_code, tf_name in tf_order:
                 df = data_dict[tf_code]
                 chart_path = create_chart(df, symbol, tf_name)
                 chart_paths.append(chart_path)
-                
-                math_res = calculate_smc_data(df)
-                smc_math[tf_name] = math_res
             
-            # AI Analysis based on JSON Rules and Python Math
+            # AI Analysis based on JSON Rules
             rules = fetch_course_rules()
-            ai_data = get_ai_analysis(chart_paths, smc_math, rules, pair)
+            ai_data = get_ai_analysis(chart_paths, rules, pair)
             
             for path in chart_paths: os.remove(path)
             
